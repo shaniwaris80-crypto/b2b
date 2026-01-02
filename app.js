@@ -1,8 +1,10 @@
 /* =========================================================
-   ARSLAN • FACTURAS & CONTABILIDAD (V2.2)
-   - Tags dinámicos por cliente (BRASEROS etc.)
-   - Modo Día/Noche (Día por defecto)
-   - PDF Pendientes: Global y por Cliente (jsPDF + AutoTable)
+   ARSLAN • FACTURAS & CONTABILIDAD (V2.3)
+   - Modo Día por defecto (light), Noche opcional (dark)
+   - Facturas: Pendiente / Pagada + botón rápido en tabla
+   - Tags por cliente (BRASEROS etc.)
+   - PDF corregido y robusto (jsPDF + AutoTable)
+   - Cloud Sync Firebase (opcional)
 ========================================================= */
 
 const $ = (sel) => document.querySelector(sel);
@@ -12,6 +14,7 @@ const money = (n) => {
   const x = Number(n || 0);
   return x.toLocaleString("es-ES", { style:"currency", currency:"EUR" });
 };
+
 const uid = () => Math.random().toString(16).slice(2) + Date.now().toString(16);
 
 function toISODate(d){
@@ -20,12 +23,14 @@ function toISODate(d){
   const dd = String(d.getDate()).padStart(2,"0");
   return `${yyyy}-${mm}-${dd}`;
 }
+
 function parseISODate(s){
   if(!s) return null;
   const [y,m,d] = s.split("-").map(Number);
   if(!y||!m||!d) return null;
   return new Date(y, m-1, d);
 }
+
 function clampDateRange(fromISO, toISO){
   const from = parseISODate(fromISO);
   const to = parseISODate(toISO);
@@ -34,6 +39,7 @@ function clampDateRange(fromISO, toISO){
   }
   return { fromISO, toISO };
 }
+
 function startOfWeek(date){
   const d = new Date(date);
   const day = (d.getDay()+6)%7; // lunes=0
@@ -41,6 +47,7 @@ function startOfWeek(date){
   d.setHours(0,0,0,0);
   return d;
 }
+
 function endOfWeek(date){
   const s = startOfWeek(date);
   const e = new Date(s);
@@ -48,17 +55,29 @@ function endOfWeek(date){
   e.setHours(23,59,59,999);
   return e;
 }
+
 function startOfMonth(date){
   const d = new Date(date.getFullYear(), date.getMonth(), 1);
   d.setHours(0,0,0,0);
   return d;
 }
+
 function endOfMonth(date){
   const d = new Date(date.getFullYear(), date.getMonth()+1, 0);
   d.setHours(23,59,59,999);
   return d;
 }
+
 function safeText(s){ return String(s ?? "").trim(); }
+
+function escapeHtml(s){
+  return String(s ?? "")
+    .replaceAll("&","&amp;")
+    .replaceAll("<","&lt;")
+    .replaceAll(">","&gt;")
+    .replaceAll('"',"&quot;")
+    .replaceAll("'","&#039;");
+}
 
 function downloadJSON(obj, filename="backup_facturas.json"){
   const blob = new Blob([JSON.stringify(obj,null,2)], {type:"application/json"});
@@ -70,6 +89,7 @@ function downloadJSON(obj, filename="backup_facturas.json"){
   a.remove();
   URL.revokeObjectURL(url);
 }
+
 function readFileAsText(file){
   return new Promise((resolve,reject)=>{
     const fr = new FileReader();
@@ -78,28 +98,24 @@ function readFileAsText(file){
     fr.readAsText(file);
   });
 }
-function escapeHtml(s){
-  return String(s ?? "")
-    .replaceAll("&","&amp;")
-    .replaceAll("<","&lt;")
-    .replaceAll(">","&gt;")
-    .replaceAll('"',"&quot;")
-    .replaceAll("'","&#039;");
-}
-function escapeHtmlAttr(s){ return escapeHtml(s).replaceAll("\n"," "); }
 
 /* ---------------------------
-   STORAGE
+   STORAGE KEYS
 --------------------------- */
 const K = {
-  PIN_OK: "ARSLAN_PIN_OK_V2",
-  DATA: "ARSLAN_FACTURAS_DATA_V2",
-  CLOUD_LAST_PUSH: "ARSLAN_CLOUD_LAST_PUSH_V2",
-  THEME: "ARSLAN_THEME_V2", // light/dark
+  PIN_OK: "ARSLAN_PIN_OK_V23",
+  DATA: "ARSLAN_FACTURAS_DATA_V23",
+  CLOUD_LAST_PUSH: "ARSLAN_CLOUD_LAST_PUSH_V23",
+  THEME: "ARSLAN_THEME_V23", // light/dark
 };
 
+const PIN_CODE = "7392";
+
+/* ---------------------------
+   DEFAULT DB
+--------------------------- */
 const DEFAULT_DATA = {
-  version: 2,
+  version: 23,
   clients: [
     { id: "cli_riviera", name: "RIVIERA", phone: "", tags: ["RIVIERA"], notes:"" },
     { id: "cli_braseros", name: "RESTAURACION HERMANOS MARIJUÁN (BRASEROS)", phone: "", tags: [
@@ -115,7 +131,7 @@ Factura: {numero}
 Fecha: {fecha}
 Tag: {tag}
 Importe: {importe}
-Estado: COBRADA ✅
+Estado: PAGADA ✅
 
 Gracias.`,
   },
@@ -128,6 +144,7 @@ let DB = loadLocal();
    CLOUD SYNC (FIREBASE)
 --------------------------- */
 const cloudStatus = $("#cloudStatus");
+
 function setCloudStatus(type, text){
   if(!cloudStatus) return;
   cloudStatus.className = "cloud-pill " + type;
@@ -146,6 +163,7 @@ function initCloud(){
       setCloudStatus("bad","☁️ Nube: no configurada");
       return;
     }
+
     firebase.initializeApp(window.__FIREBASE_CONFIG);
     const auth = firebase.auth();
     const db = firebase.database();
@@ -158,9 +176,11 @@ function initCloud(){
           setCloudStatus("bad","☁️ Sin sesión");
           return;
         }
+
         CLOUD_UID = user.uid;
         CLOUD_READY = true;
-        CLOUD_REF = db.ref("arslan_facturas_v2/" + CLOUD_UID);
+        CLOUD_REF = db.ref("arslan_facturas_v23/" + CLOUD_UID);
+
         setCloudStatus("ok","☁️ Nube online");
 
         if(!CLOUD_LISTENING){
@@ -198,6 +218,7 @@ function initCloud(){
     }).catch(()=>{
       setCloudStatus("bad","☁️ Error login");
     });
+
   }catch(e){
     setCloudStatus("bad","☁️ Error nube");
   }
@@ -251,15 +272,17 @@ function saveLocal(skipCloud=false){
 const btnTheme = $("#btnTheme");
 
 function getTheme(){
-  // default: day (light)
+  // Por defecto: DÍA (light)
   return localStorage.getItem(K.THEME) || "light";
 }
+
 function applyTheme(theme){
   const isLight = theme === "light";
   document.body.classList.toggle("light", isLight);
   if(btnTheme) btnTheme.textContent = isLight ? "☀️" : "🌙";
   localStorage.setItem(K.THEME, theme);
 }
+
 function toggleTheme(){
   const t = getTheme();
   applyTheme(t === "light" ? "dark" : "light");
@@ -275,8 +298,6 @@ const pinBtn = $("#pinBtn");
 const pinMsg = $("#pinMsg");
 const btnLock = $("#btnLock");
 
-const PIN_CODE = "7392";
-
 function isPinOk(){ return localStorage.getItem(K.PIN_OK) === "1"; }
 function setPinOk(v){ localStorage.setItem(K.PIN_OK, v ? "1" : "0"); }
 
@@ -288,12 +309,14 @@ function lock(){
   pinMsg.textContent = "";
   pinInput.focus();
 }
+
 function unlock(){
   setPinOk(true);
   pinGate.classList.add("hidden");
   app.classList.remove("hidden");
   pinMsg.textContent = "";
 }
+
 function checkPin(){
   const v = safeText(pinInput.value);
   if(v === PIN_CODE){
@@ -313,6 +336,7 @@ const tabs = {
   clients: $("#tab-clients"),
   reports: $("#tab-reports"),
 };
+
 function showTab(key){
   $$(".navItem").forEach(b=>b.classList.remove("active"));
   const btn = $(`.navItem[data-tab="${key}"]`);
@@ -339,7 +363,9 @@ function openModal(title, bodyNode, footerNode){
   if(footerNode) modalFooter.appendChild(footerNode);
   modal.classList.remove("hidden");
 }
+
 function closeModal(){ modal.classList.add("hidden"); }
+
 modalClose?.addEventListener("click", closeModal);
 modal?.addEventListener("click", (e)=>{ if(e.target === modal) closeModal(); });
 
@@ -349,12 +375,14 @@ modal?.addEventListener("click", (e)=>{ if(e.target === modal) closeModal(); });
 function getClientById(id){
   return DB.clients.find(c=>c.id===id) || null;
 }
+
 function normalizeInvoice(inv){
   const c = getClientById(inv.clientId);
   inv.clientNameCache = c ? c.name : (inv.clientNameCache || "");
   inv.updatedAt = Date.now();
   return inv;
 }
+
 function getInvoicesFiltered(opts){
   const q = safeText(opts.q).toLowerCase();
   const clientId = opts.clientId || "all";
@@ -395,17 +423,18 @@ function getInvoicesFiltered(opts){
     return (b.updatedAt||0)-(a.updatedAt||0);
   });
 }
+
 function sumByStatus(invoices){
-  const out = { Pendiente:0, Girada:0, Cobrada:0, all:0 };
+  const out = { Pendiente:0, Pagada:0, all:0 };
   for(const inv of invoices){
     const amt = Number(inv.amount||0);
     out.all += amt;
     if(inv.status==="Pendiente") out.Pendiente += amt;
-    if(inv.status==="Girada") out.Girada += amt;
-    if(inv.status==="Cobrada") out.Cobrada += amt;
+    if(inv.status==="Pagada") out.Pagada += amt;
   }
   return out;
 }
+
 function pendingByClient(search=""){
   const q = safeText(search).toLowerCase();
   const map = new Map();
@@ -491,25 +520,32 @@ function renderClientSelects(){
 --------------------------- */
 const kpiPendingGlobal = $("#kpiPendingGlobal");
 const kpiPendingCount = $("#kpiPendingCount");
-const kpiGiradaGlobal = $("#kpiGiradaGlobal");
 const kpiPaidGlobal = $("#kpiPaidGlobal");
+const kpiPaidCount = $("#kpiPaidCount");
+
 const pendingByClientList = $("#pendingByClientList");
 const dashSearchClient = $("#dashSearchClient");
+
 const dashPeriod = $("#dashPeriod");
 const dashFrom = $("#dashFrom");
 const dashTo = $("#dashTo");
 const dashApply = $("#dashApply");
 const dashSummary = $("#dashSummary");
+
 const btnPDFPendingGlobalDash = $("#btnPDFPendingGlobalDash");
+const btnPDFPaidGlobalDash = $("#btnPDFPaidGlobalDash");
 
 function renderKPIs(){
   const sums = sumByStatus(DB.invoices);
   const pendingCount = DB.invoices.filter(i=>i.status==="Pendiente").length;
+  const paidCount = DB.invoices.filter(i=>i.status==="Pagada").length;
+
   kpiPendingGlobal.textContent = money(sums.Pendiente);
   kpiPendingCount.textContent = String(pendingCount);
-  kpiGiradaGlobal.textContent = money(sums.Girada);
-  kpiPaidGlobal.textContent = money(sums.Cobrada);
+  kpiPaidGlobal.textContent = money(sums.Pagada);
+  kpiPaidCount.textContent = String(paidCount);
 }
+
 function renderPendingByClient(){
   const rows = pendingByClient(dashSearchClient?.value || "");
   pendingByClientList.innerHTML = "";
@@ -533,6 +569,7 @@ function renderPendingByClient(){
     pendingByClientList.appendChild(el);
   }
 }
+
 function renderDashSummary(){
   const sel = dashPeriod.value;
   let fromISO="", toISO="";
@@ -553,13 +590,13 @@ function renderDashSummary(){
   const boxes = [
     {t:"Total € (periodo)", v: money(sums.all)},
     {t:"Pendiente €", v: money(sums.Pendiente)},
-    {t:"Girada €", v: money(sums.Girada)},
-    {t:"Cobrada €", v: money(sums.Cobrada)},
+    {t:"Pagada €", v: money(sums.Pagada)},
+    {t:"Facturas (nº)", v: String(invs.length)},
   ];
   for(const b of boxes){
     const div = document.createElement("div");
     div.className = "sumBox";
-    div.innerHTML = `<div class="t">${b.t}</div><div class="v">${b.v}</div>`;
+    div.innerHTML = `<div class="t">${b.t}</div><div class="v">${escapeHtml(b.v)}</div>`;
     dashSummary.appendChild(div);
   }
 }
@@ -592,9 +629,10 @@ function renderInvoices(){
 
   for(const inv of list){
     total += Number(inv.amount||0);
-    const badgeCls =
-      inv.status==="Cobrada" ? "good" :
-      inv.status==="Girada" ? "warn" : "bad";
+
+    const badgeCls = inv.status==="Pagada" ? "good" : "bad";
+    const toggleLabel = inv.status==="Pagada" ? "↩︎ Pendiente" : "✅ Pagada";
+    const toggleClass = inv.status==="Pagada" ? "btn ghost" : "btn";
 
     const tr = document.createElement("tr");
     tr.innerHTML = `
@@ -603,8 +641,9 @@ function renderInvoices(){
       <td>${escapeHtml(inv.clientNameCache||"")}</td>
       <td>${escapeHtml(inv.tag||"")}</td>
       <td class="right">${money(inv.amount||0)}</td>
-      <td><span class="badge ${badgeCls}">${inv.status}</span></td>
+      <td><span class="badge ${badgeCls}">${escapeHtml(inv.status||"")}</span></td>
       <td>
+        <button class="${toggleClass}" data-act="toggle" data-id="${inv.id}">${toggleLabel}</button>
         <button class="btn ghost" data-act="edit" data-id="${inv.id}">Editar</button>
         <button class="btn ghost" data-act="msg" data-id="${inv.id}">Mensaje</button>
         <button class="btn ghost danger" data-act="del" data-id="${inv.id}">Borrar</button>
@@ -620,11 +659,21 @@ function renderInvoices(){
     btn.addEventListener("click", ()=>{
       const id = btn.dataset.id;
       const act = btn.dataset.act;
+      if(act==="toggle") toggleInvoiceStatus(id);
       if(act==="edit") openInvoiceModal(id);
       if(act==="msg") openMessageModal(id);
       if(act==="del") deleteInvoice(id);
     });
   });
+}
+
+function toggleInvoiceStatus(id){
+  const inv = DB.invoices.find(x=>x.id===id);
+  if(!inv) return;
+  inv.status = inv.status==="Pagada" ? "Pendiente" : "Pagada";
+  normalizeInvoice(inv);
+  saveLocal();
+  renderAll();
 }
 
 function deleteInvoice(id){
@@ -645,6 +694,7 @@ function deleteInvoice(id){
 
   const foot = document.createElement("div");
   foot.className = "row";
+
   const cancel = document.createElement("button");
   cancel.className = "btn ghost";
   cancel.textContent = "Cancelar";
@@ -666,13 +716,14 @@ function deleteInvoice(id){
 }
 
 /* ---------------------------
-   TAGS POR CLIENTE (IMPORTANTE)
+   TAGS POR CLIENTE
 --------------------------- */
 function getTagsForClient(clientId){
   const c = getClientById(clientId);
   const tags = Array.isArray(c?.tags) ? c.tags : [];
   return tags.map(t=>({value:t, label:t}));
 }
+
 function fillTagSelect(tagSelect, clientId, preferValue=""){
   const opts = getTagsForClient(clientId);
   tagSelect.innerHTML = "";
@@ -692,13 +743,12 @@ function fillTagSelect(tagSelect, clientId, preferValue=""){
     tagSelect.appendChild(el);
   }
 
-  // si hay un valor preferido y existe, lo dejamos; si no, primer tag (default)
   const exists = opts.some(o=>o.value === preferValue);
-  tagSelect.value = exists ? preferValue : opts[0].value;
+  tagSelect.value = exists ? preferValue : opts[0].value; // default: primero
 }
 
 /* ---------------------------
-   INVOICE MODAL
+   FORM HELPERS
 --------------------------- */
 function mkInput(label, type, value){
   const wrap = document.createElement("div");
@@ -712,6 +762,7 @@ function mkInput(label, type, value){
   wrap.append(l,input);
   return { wrap, input };
 }
+
 function mkSelect(label, options, value){
   const wrap = document.createElement("div");
   const l = document.createElement("div");
@@ -735,6 +786,7 @@ function mkSelect(label, options, value){
   wrap.append(l,select);
   return { wrap, select };
 }
+
 function mkTextArea(label, value){
   const wrap = document.createElement("div");
   const l = document.createElement("div");
@@ -747,6 +799,9 @@ function mkTextArea(label, value){
   return { wrap, textarea };
 }
 
+/* ---------------------------
+   INVOICE MODAL
+--------------------------- */
 function openInvoiceModal(editId=null){
   const isEdit = !!editId;
   const inv = isEdit ? DB.invoices.find(x=>x.id===editId) : null;
@@ -756,9 +811,12 @@ function openInvoiceModal(editId=null){
 
   const date = mkInput("Fecha", "date", inv?.dateISO || toISODate(new Date()));
   const number = mkInput("Nº factura", "text", inv?.number || "");
-  const client = mkSelect("Cliente", DB.clients.map(c=>({value:c.id,label:c.name})), inv?.clientId || (DB.clients[0]?.id || ""));
+  const client = mkSelect(
+    "Cliente",
+    DB.clients.map(c=>({value:c.id,label:c.name})),
+    inv?.clientId || (DB.clients[0]?.id || "")
+  );
 
-  // TAG select dinámico: se rellena con tags del cliente y default primer tag
   const tagWrap = document.createElement("div");
   const tagLabel = document.createElement("div");
   tagLabel.className = "muted";
@@ -774,8 +832,7 @@ function openInvoiceModal(editId=null){
 
   const status = mkSelect("Estado", [
     {value:"Pendiente",label:"Pendiente"},
-    {value:"Girada",label:"Girada"},
-    {value:"Cobrada",label:"Cobrada"},
+    {value:"Pagada",label:"Pagada"},
   ], inv?.status || "Pendiente");
 
   const notes = mkTextArea("Observaciones", inv?.notes || "");
@@ -788,7 +845,6 @@ function openInvoiceModal(editId=null){
     notes.wrap
   );
 
-  // Cuando cambias cliente: tags correspondientes y por defecto el primero
   client.select.addEventListener("change", ()=>{
     fillTagSelect(tagSelect, client.select.value, "");
   });
@@ -932,7 +988,7 @@ function openMessageModal(invId){
 }
 
 /* ---------------------------
-   CLIENTS UI (igual que antes, simplificado)
+   CLIENTS UI
 --------------------------- */
 const btnNewClient = $("#btnNewClient");
 const clientSearch = $("#clientSearch");
@@ -987,12 +1043,10 @@ function renderClientDetail(){
   }
 
   const pendingInv = DB.invoices.filter(i=>i.clientId===c.id && i.status==="Pendiente");
-  const giradaInv = DB.invoices.filter(i=>i.clientId===c.id && i.status==="Girada");
-  const paidInv = DB.invoices.filter(i=>i.clientId===c.id && i.status==="Cobrada");
+  const paidInv = DB.invoices.filter(i=>i.clientId===c.id && i.status==="Pagada");
 
   const sums = {
     pending: pendingInv.reduce((s,i)=>s+Number(i.amount||0),0),
-    girada: giradaInv.reduce((s,i)=>s+Number(i.amount||0),0),
     paid: paidInv.reduce((s,i)=>s+Number(i.amount||0),0),
   };
 
@@ -1008,8 +1062,7 @@ function renderClientDetail(){
     </div>
     <div class="row wrap">
       <span class="badge bad">Pend: ${money(sums.pending)}</span>
-      <span class="badge warn">Girada: ${money(sums.girada)}</span>
-      <span class="badge good">Cobrada: ${money(sums.paid)}</span>
+      <span class="badge good">Pagada: ${money(sums.paid)}</span>
     </div>
   `;
 
@@ -1026,12 +1079,17 @@ function renderClientDetail(){
   addTag.textContent = "+ Añadir tag";
   addTag.onclick = ()=>openAddTagModal(c.id);
 
-  const pdf = document.createElement("button");
-  pdf.className = "btn ghost";
-  pdf.textContent = "📄 PDF Pendientes";
-  pdf.onclick = ()=>generatePendingPDF("client", c.id);
+  const pdfPend = document.createElement("button");
+  pdfPend.className = "btn ghost";
+  pdfPend.textContent = "📄 PDF Pendientes";
+  pdfPend.onclick = ()=>generateStatusPDF("Pendiente", "client", c.id);
 
-  actions.append(edit, addTag, pdf);
+  const pdfPaid = document.createElement("button");
+  pdfPaid.className = "btn ghost";
+  pdfPaid.textContent = "📄 PDF Pagadas";
+  pdfPaid.onclick = ()=>generateStatusPDF("Pagada", "client", c.id);
+
+  actions.append(edit, addTag, pdfPend, pdfPaid);
 
   wrap.append(top, actions);
   clientDetail.innerHTML = "";
@@ -1108,6 +1166,7 @@ function openAddTagModal(clientId){
 
   const foot = document.createElement("div");
   foot.className="row";
+
   const cancel = document.createElement("button");
   cancel.className="btn ghost";
   cancel.textContent="Cancelar";
@@ -1131,7 +1190,7 @@ function openAddTagModal(clientId){
 }
 
 /* ---------------------------
-   REPORTS + PDF
+   REPORTS
 --------------------------- */
 const repMode = $("#repMode");
 const repFrom = $("#repFrom");
@@ -1142,6 +1201,8 @@ const repOut = $("#repOut");
 
 const btnPDFPendingGlobal = $("#btnPDFPendingGlobal");
 const btnPDFPendingClient = $("#btnPDFPendingClient");
+const btnPDFPaidGlobal = $("#btnPDFPaidGlobal");
+const btnPDFPaidClient = $("#btnPDFPaidClient");
 
 function runReports(){
   repOut.innerHTML = "";
@@ -1173,6 +1234,7 @@ function runReports(){
   }
 
   const sums = sumByStatus(invs);
+
   const box = document.createElement("div");
   box.className="item";
   box.innerHTML = `
@@ -1182,93 +1244,182 @@ function runReports(){
     </div>
     <div class="row wrap">
       <span class="badge bad">Pend: ${money(sums.Pendiente)}</span>
-      <span class="badge warn">Girada: ${money(sums.Girada)}</span>
-      <span class="badge good">Cobrada: ${money(sums.Cobrada)}</span>
+      <span class="badge good">Pagada: ${money(sums.Pagada)}</span>
       <span class="badge">Total: ${money(sums.all)}</span>
     </div>
   `;
   repOut.appendChild(box);
 }
 
-/* ===== PDF Pendientes ===== */
-function generatePendingPDF(scope="global", clientId=null){
-  const { jsPDF } = window.jspdf || {};
-  if(!jsPDF || !window.jspdf || !window.jspdf.jsPDF){
-    alert("No se cargó jsPDF. Revisa que tengas los scripts CDN en index.html.");
-    return;
-  }
+/* ---------------------------
+   PDF (CORREGIDO Y ROBUSTO)
+--------------------------- */
+function ensurePDFLibs(){
+  // jsPDF UMD
+  const hasUMD = !!window.jspdf;
+  const hasJsPDF = hasUMD && typeof window.jspdf.jsPDF === "function";
+  const jsPDF = hasJsPDF ? window.jspdf.jsPDF : null;
 
-  const doc = new window.jspdf.jsPDF({ orientation:"portrait", unit:"pt", format:"a4" });
-  const pageW = doc.internal.pageSize.getWidth();
-  const margin = 40;
-
-  const now = new Date();
-  const created = `${toISODate(now)} ${String(now.getHours()).padStart(2,"0")}:${String(now.getMinutes()).padStart(2,"0")}`;
-
-  // datos
-  let pending = DB.invoices.filter(i=>i.status==="Pendiente");
-  let title = "Pendientes (Global)";
-  if(scope==="client"){
-    const c = getClientById(clientId);
-    title = `Pendientes · ${c?.name || "Cliente"}`;
-    pending = pending.filter(i=>i.clientId===clientId);
-  }
-
-  // orden por fecha asc (más claro en PDF)
-  pending = pending.slice().sort((a,b)=>{
-    const da = parseISODate(a.dateISO)?.getTime() || 0;
-    const db = parseISODate(b.dateISO)?.getTime() || 0;
-    return da - db;
-  });
-
-  // header
-  doc.setFont("helvetica","bold");
-  doc.setFontSize(16);
-  doc.text("ARSLAN • Reporte", margin, 52);
-  doc.setFontSize(13);
-  doc.text(title, margin, 74);
-
-  doc.setFont("helvetica","normal");
-  doc.setFontSize(10);
-  doc.text(`Generado: ${created}`, margin, 92);
-
-  // resumen
-  const total = pending.reduce((s,i)=>s+Number(i.amount||0),0);
-  doc.setFont("helvetica","bold");
-  doc.setFontSize(12);
-  doc.text(`Total pendiente: ${money(total)}`, margin, 118);
-
-  // sin datos
-  if(pending.length===0){
-    doc.setFont("helvetica","normal");
-    doc.setFontSize(11);
-    doc.text("No hay facturas pendientes.", margin, 150);
-    doc.save(`pendientes_${scope==="client" ? "cliente" : "global"}_${toISODate(now)}.pdf`);
-    return;
-  }
-
-  // tablas
-  if(scope==="global"){
-    // agrupado por cliente con subtotales + tabla por cliente
-    const groups = new Map(); // clientName -> invs
-    for(const inv of pending){
-      const name = inv.clientNameCache || "(Sin cliente)";
-      if(!groups.has(name)) groups.set(name, []);
-      groups.get(name).push(inv);
+  let autoTableOk = false;
+  try{
+    if(hasJsPDF){
+      const test = new jsPDF({ unit:"pt", format:"a4" });
+      autoTableOk = typeof test.autoTable === "function";
     }
-    const clientNames = Array.from(groups.keys()).sort((a,b)=>a.localeCompare(b));
+  }catch(e){
+    autoTableOk = false;
+  }
 
-    let y = 140;
-    for(const name of clientNames){
-      const invs = groups.get(name);
-      const sub = invs.reduce((s,i)=>s+Number(i.amount||0),0);
+  return { jsPDF, autoTableOk };
+}
+
+function showPDFError(title, err){
+  const body = document.createElement("div");
+  body.innerHTML = `
+    <div class="muted">No se pudo generar el PDF.</div>
+    <div style="margin-top:10px" class="item">
+      <div>
+        <div class="name">${escapeHtml(title)}</div>
+        <div class="sub">${escapeHtml(String(err?.message || err || "Error desconocido"))}</div>
+      </div>
+      <div class="badge bad">PDF</div>
+    </div>
+    <div class="muted" style="margin-top:12px;">
+      Revisa que existan estos scripts en index.html:<br/>
+      - jspdf.umd.min.js<br/>
+      - jspdf.plugin.autotable.min.js
+    </div>
+  `;
+
+  const foot = document.createElement("div");
+  foot.className = "row";
+  const ok = document.createElement("button");
+  ok.className = "btn";
+  ok.textContent = "Cerrar";
+  ok.onclick = closeModal;
+  foot.appendChild(ok);
+
+  openModal("Error PDF", body, foot);
+}
+
+function generateStatusPDF(statusWanted, scope="global", clientId=null){
+  const libs = ensurePDFLibs();
+  if(!libs.jsPDF){
+    showPDFError("Librería jsPDF no encontrada", "Falta window.jspdf.jsPDF (CDN no cargado).");
+    return;
+  }
+  if(!libs.autoTableOk){
+    showPDFError("AutoTable no disponible", "Falta plugin AutoTable o no se cargó correctamente.");
+    return;
+  }
+
+  try{
+    const doc = new libs.jsPDF({ orientation:"portrait", unit:"pt", format:"a4" });
+    const pageW = doc.internal.pageSize.getWidth();
+    const margin = 40;
+
+    const now = new Date();
+    const created = `${toISODate(now)} ${String(now.getHours()).padStart(2,"0")}:${String(now.getMinutes()).padStart(2,"0")}`;
+
+    // datos
+    let list = DB.invoices.filter(i=>i.status === statusWanted);
+    let title = `${statusWanted} (Global)`;
+
+    if(scope==="client"){
+      const c = getClientById(clientId);
+      title = `${statusWanted} · ${c?.name || "Cliente"}`;
+      list = list.filter(i=>i.clientId===clientId);
+    }
+
+    // orden por fecha asc para PDF
+    list = list.slice().sort((a,b)=>{
+      const da = parseISODate(a.dateISO)?.getTime() || 0;
+      const db = parseISODate(b.dateISO)?.getTime() || 0;
+      return da - db;
+    });
+
+    // header
+    doc.setFont("helvetica","bold");
+    doc.setFontSize(16);
+    doc.text("ARSLAN • Reporte", margin, 52);
+
+    doc.setFontSize(13);
+    doc.text(title, margin, 74);
+
+    doc.setFont("helvetica","normal");
+    doc.setFontSize(10);
+    doc.text(`Generado: ${created}`, margin, 92);
+
+    // resumen
+    const total = list.reduce((s,i)=>s+Number(i.amount||0),0);
+    doc.setFont("helvetica","bold");
+    doc.setFontSize(12);
+    doc.text(`Total ${statusWanted.toLowerCase()}: ${money(total)}`, margin, 118);
+
+    if(list.length===0){
+      doc.setFont("helvetica","normal");
+      doc.setFontSize(11);
+      doc.text(`No hay facturas en estado: ${statusWanted}.`, margin, 150);
+      doc.save(`${statusWanted.toLowerCase()}_${scope==="client" ? "cliente" : "global"}_${toISODate(now)}.pdf`);
+      return;
+    }
+
+    // colores cabecera (jsPDF-autotable espera RGB)
+    const headFill = [30, 42, 58];
+
+    if(scope==="global"){
+      // agrupado por cliente
+      const groups = new Map();
+      for(const inv of list){
+        const name = inv.clientNameCache || "(Sin cliente)";
+        if(!groups.has(name)) groups.set(name, []);
+        groups.get(name).push(inv);
+      }
+      const clientNames = Array.from(groups.keys()).sort((a,b)=>a.localeCompare(b));
+
+      let y = 140;
+
+      for(const name of clientNames){
+        const invs = groups.get(name);
+        const sub = invs.reduce((s,i)=>s+Number(i.amount||0),0);
+
+        doc.setFont("helvetica","bold");
+        doc.setFontSize(12);
+        doc.text(`${name} — Subtotal: ${money(sub)}`, margin, y);
+        y += 10;
+
+        const rows = invs.map(i=>[
+          i.dateISO || "",
+          i.number || "",
+          i.tag || "",
+          (Number(i.amount||0)).toLocaleString("es-ES", {minimumFractionDigits:2, maximumFractionDigits:2})
+        ]);
+
+        doc.autoTable({
+          startY: y + 10,
+          head: [["Fecha","Nº factura","Tag","Importe"]],
+          body: rows,
+          styles: { font:"helvetica", fontSize:10, cellPadding:6 },
+          headStyles: { fillColor: headFill },
+          theme: "grid",
+          margin: { left: margin, right: margin },
+          columnStyles: { 3: { halign:"right" } }
+        });
+
+        y = doc.lastAutoTable.finalY + 18;
+
+        if(y > 760){
+          doc.addPage();
+          y = 60;
+        }
+      }
 
       doc.setFont("helvetica","bold");
-      doc.setFontSize(12);
-      doc.text(`${name} — Subtotal: ${money(sub)}`, margin, y);
-      y += 10;
+      doc.setFontSize(13);
+      doc.text(`TOTAL GLOBAL ${statusWanted.toUpperCase()}: ${money(total)}`, margin, Math.min(780, y));
 
-      const rows = invs.map(i=>[
+    }else{
+      const rows = list.map(i=>[
         i.dateISO || "",
         i.number || "",
         i.tag || "",
@@ -1276,68 +1427,36 @@ function generatePendingPDF(scope="global", clientId=null){
       ]);
 
       doc.autoTable({
-        startY: y + 10,
+        startY: 140,
         head: [["Fecha","Nº factura","Tag","Importe"]],
         body: rows,
         styles: { font:"helvetica", fontSize:10, cellPadding:6 },
-        headStyles: { fillColor: [30, 42, 58] },
+        headStyles: { fillColor: headFill },
         theme: "grid",
         margin: { left: margin, right: margin },
-        columnStyles: {
-          3: { halign:"right" }
-        }
+        columnStyles: { 3: { halign:"right" } }
       });
 
-      y = doc.lastAutoTable.finalY + 18;
-
-      // salto si falta espacio
-      if(y > 760){
-        doc.addPage();
-        y = 60;
-      }
+      const y = doc.lastAutoTable.finalY + 22;
+      doc.setFont("helvetica","bold");
+      doc.setFontSize(13);
+      doc.text(`TOTAL ${statusWanted.toUpperCase()}: ${money(total)}`, margin, Math.min(780, y));
     }
 
-    // total final
-    doc.setFont("helvetica","bold");
-    doc.setFontSize(13);
-    doc.text(`TOTAL PENDIENTE GLOBAL: ${money(total)}`, margin, Math.min(780, y));
+    // footer pages
+    const pageCount = doc.internal.getNumberOfPages();
+    for(let p=1; p<=pageCount; p++){
+      doc.setPage(p);
+      doc.setFont("helvetica","normal");
+      doc.setFontSize(9);
+      doc.text(`Página ${p} / ${pageCount}`, pageW - margin, 820, { align:"right" });
+    }
 
-  }else{
-    // cliente: una sola tabla
-    const rows = pending.map(i=>[
-      i.dateISO || "",
-      i.number || "",
-      i.tag || "",
-      (Number(i.amount||0)).toLocaleString("es-ES", {minimumFractionDigits:2, maximumFractionDigits:2})
-    ]);
+    doc.save(`${statusWanted.toLowerCase()}_${scope==="client" ? "cliente" : "global"}_${toISODate(now)}.pdf`);
 
-    doc.autoTable({
-      startY: 140,
-      head: [["Fecha","Nº factura","Tag","Importe"]],
-      body: rows,
-      styles: { font:"helvetica", fontSize:10, cellPadding:6 },
-      headStyles: { fillColor: [30, 42, 58] },
-      theme: "grid",
-      margin: { left: margin, right: margin },
-      columnStyles: { 3: { halign:"right" } }
-    });
-
-    const y = doc.lastAutoTable.finalY + 22;
-    doc.setFont("helvetica","bold");
-    doc.setFontSize(13);
-    doc.text(`TOTAL PENDIENTE: ${money(total)}`, margin, Math.min(780, y));
+  }catch(err){
+    showPDFError("Generación PDF", err);
   }
-
-  // footer pages
-  const pageCount = doc.internal.getNumberOfPages();
-  for(let p=1; p<=pageCount; p++){
-    doc.setPage(p);
-    doc.setFont("helvetica","normal");
-    doc.setFontSize(9);
-    doc.text(`Página ${p} / ${pageCount}`, pageW - margin, 820, { align:"right" });
-  }
-
-  doc.save(`pendientes_${scope==="client" ? "cliente" : "global"}_${toISODate(now)}.pdf`);
 }
 
 /* ---------------------------
@@ -1356,14 +1475,18 @@ async function doImport(file){
   DB = obj;
   if(!DB.settings) DB.settings = structuredClone(DEFAULT_DATA.settings);
   if(!DB.meta) DB.meta = { updatedAt: Date.now() };
+
   saveLocal();
   renderAll();
 }
+
 function resetLocal(){
   const body = document.createElement("div");
   body.innerHTML = `<div class="muted">Esto borra el almacenamiento local y restaura datos iniciales. La nube (si está activa) puede volver a sincronizar datos luego.</div>`;
+
   const foot = document.createElement("div");
   foot.className="row";
+
   const cancel = document.createElement("button");
   cancel.className="btn ghost";
   cancel.textContent="Cancelar";
@@ -1378,6 +1501,7 @@ function resetLocal(){
     closeModal();
     renderAll();
   };
+
   foot.append(cancel, ok);
   openModal("Reset local", body, foot);
 }
@@ -1420,7 +1544,9 @@ function bindEvents(){
     dashTo.disabled = !isCustom;
     renderDashSummary();
   });
-  btnPDFPendingGlobalDash?.addEventListener("click", ()=>generatePendingPDF("global"));
+
+  btnPDFPendingGlobalDash?.addEventListener("click", ()=>generateStatusPDF("Pendiente", "global"));
+  btnPDFPaidGlobalDash?.addEventListener("click", ()=>generateStatusPDF("Pagada", "global"));
 
   // Invoices
   const rerInv = ()=>renderInvoices();
@@ -1429,6 +1555,7 @@ function bindEvents(){
   invStatusFilter?.addEventListener("change", rerInv);
   invFrom?.addEventListener("change", rerInv);
   invTo?.addEventListener("change", rerInv);
+
   invClearFilters?.addEventListener("click", ()=>{
     invSearch.value = "";
     invClientFilter.value = "all";
@@ -1437,6 +1564,7 @@ function bindEvents(){
     invTo.value = "";
     renderInvoices();
   });
+
   btnNewInvoice?.addEventListener("click", ()=>openInvoiceModal(null));
 
   // Clients
@@ -1456,14 +1584,24 @@ function bindEvents(){
     }
   });
 
-  btnPDFPendingGlobal?.addEventListener("click", ()=>generatePendingPDF("global"));
+  btnPDFPendingGlobal?.addEventListener("click", ()=>generateStatusPDF("Pendiente", "global"));
   btnPDFPendingClient?.addEventListener("click", ()=>{
     const id = repClient.value;
     if(!id || id==="all"){
-      alert("Selecciona un cliente en el desplegable para PDF por cliente.");
+      alert("Selecciona un cliente para PDF Pendientes Cliente.");
       return;
     }
-    generatePendingPDF("client", id);
+    generateStatusPDF("Pendiente", "client", id);
+  });
+
+  btnPDFPaidGlobal?.addEventListener("click", ()=>generateStatusPDF("Pagada", "global"));
+  btnPDFPaidClient?.addEventListener("click", ()=>{
+    const id = repClient.value;
+    if(!id || id==="all"){
+      alert("Selecciona un cliente para PDF Pagadas Cliente.");
+      return;
+    }
+    generateStatusPDF("Pagada", "client", id);
   });
 
   // Export/Import/Reset
@@ -1471,6 +1609,7 @@ function bindEvents(){
     const stamp = new Date();
     downloadJSON(DB, `facturas_backup_${toISODate(stamp)}.json`);
   });
+
   fileImport?.addEventListener("change", async ()=>{
     const f = fileImport.files?.[0];
     if(!f) return;
@@ -1483,6 +1622,7 @@ function bindEvents(){
       fileImport.value = "";
     }
   });
+
   btnClearLocal?.addEventListener("click", resetLocal);
 }
 
@@ -1490,7 +1630,7 @@ function bindEvents(){
    INIT
 --------------------------- */
 (function init(){
-  // tema por defecto: día
+  // tema por defecto: DÍA (light)
   applyTheme(getTheme());
 
   bindEvents();
@@ -1504,11 +1644,14 @@ function bindEvents(){
 
   // Default dates
   const now = new Date();
+
+  // Dashboard
   dashFrom.value = toISODate(startOfWeek(now));
   dashTo.value = toISODate(endOfWeek(now));
   dashFrom.disabled = true;
   dashTo.disabled = true;
 
+  // Reports
   repFrom.value = toISODate(startOfWeek(now));
   repTo.value = toISODate(endOfWeek(now));
 
