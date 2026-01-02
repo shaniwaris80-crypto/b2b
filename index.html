@@ -11,29 +11,8 @@
 
   <link rel="stylesheet" href="./style.css" />
 </head>
-  <div id="cloudAccountModal" style="display:none;position:fixed;inset:0;background:#0008;z-index:9999;">
-  <div style="background:#fff;max-width:360px;margin:10% auto;padding:20px;border-radius:12px">
-    <h3>☁️ Cuenta Nube</h3>
 
-    <input id="cloudEmail" type="email" placeholder="Email"
-      style="width:100%;margin-bottom:8px">
-
-    <input id="cloudPass" type="password" placeholder="Password"
-      style="width:100%;margin-bottom:12px">
-
-    <button onclick="cloudLoginUI()" style="width:100%">Entrar nube</button>
-    <button onclick="cloudRegisterUI()" style="width:100%;margin-top:6px">
-      Crear cuenta
-    </button>
-
-    <button onclick="closeCloudAccount()" style="width:100%;margin-top:10px">
-      Cerrar
-    </button>
-  </div>
-</div>
-
-
-<body>
+<body class="light">
   <!-- TOP BAR -->
   <header class="topbar">
     <div class="brand">
@@ -46,10 +25,11 @@
 
     <div class="topbarRight">
       <button id="btnTheme" class="btn ghost" title="Modo Día/Noche">☀️</button>
-      <div id="cloudStatus" class="cloud-pill warn">☁️ Conectando…</div>
-      <button id="btnLock" class="btn ghost" title="Bloquear">🔒</button>
-      <button onclick="openCloudAccount()">☁️ Cuenta Nube</button>
 
+      <div id="cloudStatus" class="cloud-pill warn" title="Estado de conexión cloud">☁️ Nube: comprobando…</div>
+
+      <button id="btnCloudQuick" class="btn ghost" title="Abrir Cuenta Nube">☁️</button>
+      <button id="btnLock" class="btn ghost" title="Bloquear">🔒</button>
     </div>
   </header>
 
@@ -71,7 +51,7 @@
       <div id="pinMsg" class="msg"></div>
 
       <div class="hint muted">
-        Tip: si quieres cambiar de usuario, pulsa 🔒 arriba para volver a la pantalla de acceso.
+        Tip: pulsa 🔒 para volver a esta pantalla cuando quieras cambiar de usuario.
       </div>
     </div>
   </section>
@@ -87,6 +67,8 @@
         <button class="navItem" data-tab="clients">👥 Clientes</button>
         <button class="navItem" data-tab="reports">📈 Reportes</button>
         <button class="navItem" data-tab="users">🔐 Usuarios</button>
+
+        <button class="navItem" id="btnOpenCloudAccount">☁️ Cuenta Nube</button>
 
         <div class="sep"></div>
 
@@ -301,27 +283,56 @@
                 <button id="btnNewUser" class="btn">+ Nuevo usuario</button>
               </div>
               <div class="muted">
-                Cada usuario tiene su propio PIN y sus datos quedan separados (Local + Nube).
+                Cada usuario tiene su propio PIN y sus datos quedan separados.
               </div>
               <div id="usersList" class="list"></div>
             </div>
 
             <div class="card">
               <div class="cardHeader">
-                <h3>Seguridad</h3>
-                <span class="pill">Recomendación</span>
+                <h3>Cuenta Nube</h3>
+                <span class="pill">Email/Password · misma nube en todos dispositivos</span>
               </div>
+
               <div class="muted">
-                - Usa PINs distintos para cada persona.<br/>
-                - Si quieres, luego añadimos “permisos” (solo lectura / admin).<br/>
-                - Para cambiar de usuario: 🔒 (bloquear) y entrar con otro.
+                Entra con el mismo Email/Password en móvil y PC para ver exactamente los mismos datos.
               </div>
-              <div style="margin-top:12px" class="item">
-                <div>
-                  <div class="name">Usuario activo</div>
-                  <div class="sub" id="activeUserLabel2"></div>
+
+              <div class="formGrid" style="margin-top:12px;">
+                <div class="full">
+                  <div class="muted">Email</div>
+                  <input id="cloudEmail" class="input" type="email" placeholder="ej: admin@arslanpro.com" />
                 </div>
-                <div class="badge warn">Sesión</div>
+                <div class="full">
+                  <div class="muted">Password</div>
+                  <input id="cloudPass" class="input" type="password" placeholder="Contraseña" />
+                </div>
+              </div>
+
+              <div class="row wrap" style="margin-top:12px;">
+                <button id="btnCloudLogin" class="btn">Entrar nube</button>
+                <button id="btnCloudRegister" class="btn ghost">Crear cuenta</button>
+                <button id="btnCloudLogout" class="btn ghost">Salir</button>
+              </div>
+
+              <div class="item" style="margin-top:12px;">
+                <div>
+                  <div class="name">Usuario interno activo</div>
+                  <div class="sub" id="activeUserLabel2">—</div>
+                </div>
+                <div class="badge warn">PIN</div>
+              </div>
+
+              <div class="item">
+                <div>
+                  <div class="name">UID nube</div>
+                  <div class="sub" id="cloudUidLabel">—</div>
+                </div>
+                <div class="badge">Cloud</div>
+              </div>
+
+              <div class="muted" style="margin-top:10px;">
+                Si arriba pone <b>☁️ Nube online</b>, todo lo que hagas se sincroniza automáticamente.
               </div>
             </div>
           </div>
@@ -331,7 +342,7 @@
     </div>
   </main>
 
-  <!-- MODAL -->
+  <!-- MODAL (global) -->
   <div id="modal" class="modal hidden">
     <div class="modalCard">
       <div class="modalHeader">
@@ -343,18 +354,28 @@
     </div>
   </div>
 
-  <!-- FIREBASE (Cloud Sync) -->
-<script>
-  window.__FIREBASE_CONFIG = {
-    apiKey: "AIzaSyB-9t7QSN-7iDWphqL74SNnpGNmFnIP4E4",
-    authDomain: "b2baw-b6b8a.firebaseapp.com",
-    databaseURL: "https://b2baw-b6b8a-default-rtdb.europe-west1.firebasedatabase.app",
-    projectId: "b2baw-b6b8a",
-    appId: "1:170701923822:web:4ad786c3f58fa11edb1aff"
-  };
-</script>
+  <!-- FIREBASE CONFIG (PEGA AQUÍ TU CONFIG REAL) -->
+  <script>
+    // ✅ PEGA TU CONFIG AQUÍ (sin comentarios) para que la nube guarde TODO
+    // window.__FIREBASE_CONFIG = {
+    //   apiKey: "TU_API_KEY",
+    //   authDomain: "TU_PROYECTO.firebaseapp.com",
+    //   databaseURL: "https://TU_PROYECTO-default-rtdb.europe-west1.firebasedatabase.app",
+    //   projectId: "TU_PROYECTO",
+    //   appId: "TU_APP_ID"
+    // };
 
+    // ✅ EJEMPLO (tú ya me diste tu config; pégala aquí):
+    window.__FIREBASE_CONFIG = {
+      apiKey: "AIzaSyB-9t7QSN-7iDWphqL74SNnpGNmFnIP4E4",
+      authDomain: "b2baw-b6b8a.firebaseapp.com",
+      databaseURL: "https://b2baw-b6b8a-default-rtdb.europe-west1.firebasedatabase.app",
+      projectId: "b2baw-b6b8a",
+      appId: "1:170701923822:web:4ad786c3f58fa11edb1aff"
+    };
+  </script>
 
+  <!-- FIREBASE compat -->
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
