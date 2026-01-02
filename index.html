@@ -1,1 +1,252 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>ARSLAN • Facturas & Contabilidad</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="./style.css" />
+</head>
+
+<body>
+  <!-- TOP BAR -->
+  <header class="topbar">
+    <div class="brand">
+      <div class="logo">A</div>
+      <div class="brandText">
+        <div class="title">ARSLAN • Facturas</div>
+        <div class="subtitle">Control por cliente · estados · semanas · meses · nube</div>
+      </div>
+    </div>
+
+    <div class="topbarRight">
+      <div id="cloudStatus" class="cloud-pill warn">☁️ Conectando…</div>
+      <button id="btnLock" class="btn ghost" title="Bloquear">🔒</button>
+    </div>
+  </header>
+
+  <!-- PIN GATE -->
+  <section id="pinGate" class="gate">
+    <div class="gateCard">
+      <h2>Acceso protegido</h2>
+      <p class="muted">Introduce tu PIN para entrar al sistema.</p>
+      <div class="gateRow">
+        <input id="pinInput" type="password" inputmode="numeric" autocomplete="one-time-code" placeholder="PIN" />
+        <button id="pinBtn" class="btn">Entrar</button>
+      </div>
+      <div id="pinMsg" class="msg"></div>
+      <div class="hint muted">Tip: puedes bloquear con 🔒 arriba.</div>
+    </div>
+  </section>
+
+  <!-- APP -->
+  <main id="app" class="app hidden">
+    <div class="layout">
+      <!-- LEFT: NAV -->
+      <aside class="sidebar">
+        <button class="navItem active" data-tab="dashboard">📊 Dashboard</button>
+        <button class="navItem" data-tab="invoices">🧾 Facturas</button>
+        <button class="navItem" data-tab="clients">👥 Clientes</button>
+        <button class="navItem" data-tab="reports">📈 Reportes</button>
+        <div class="sep"></div>
+        <button id="btnExport" class="navItem">⬇️ Exportar JSON</button>
+        <label class="navItem fileLabel">
+          ⬆️ Importar JSON
+          <input id="fileImport" type="file" accept="application/json" hidden />
+        </label>
+        <button id="btnClearLocal" class="navItem danger">🧹 Reset local</button>
+      </aside>
+
+      <!-- RIGHT: CONTENT -->
+      <section class="content">
+
+        <!-- DASHBOARD -->
+        <section class="tab" id="tab-dashboard">
+          <div class="grid2">
+            <div class="card">
+              <div class="cardHeader">
+                <h3>Pendientes (global)</h3>
+                <span class="pill">Siempre visible</span>
+              </div>
+              <div class="kpis">
+                <div class="kpi">
+                  <div class="kLabel">Pendiente €</div>
+                  <div id="kpiPendingGlobal" class="kValue">0,00 €</div>
+                </div>
+                <div class="kpi">
+                  <div class="kLabel">Pendientes (nº)</div>
+                  <div id="kpiPendingCount" class="kValue">0</div>
+                </div>
+                <div class="kpi">
+                  <div class="kLabel">Giradas €</div>
+                  <div id="kpiGiradaGlobal" class="kValue">0,00 €</div>
+                </div>
+                <div class="kpi">
+                  <div class="kLabel">Cobradas €</div>
+                  <div id="kpiPaidGlobal" class="kValue">0,00 €</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="cardHeader">
+                <h3>Pendiente por cliente</h3>
+                <div class="row">
+                  <input id="dashSearchClient" class="input" placeholder="Buscar cliente…" />
+                </div>
+              </div>
+              <div id="pendingByClientList" class="list"></div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="cardHeader">
+              <h3>Resumen rápido por periodo</h3>
+              <div class="row">
+                <select id="dashPeriod" class="input">
+                  <option value="thisWeek">Esta semana</option>
+                  <option value="lastWeek">Semana pasada</option>
+                  <option value="thisMonth">Este mes</option>
+                  <option value="lastMonth">Mes pasado</option>
+                  <option value="year">Año actual</option>
+                  <option value="all">Todo</option>
+                  <option value="custom">Personalizado</option>
+                </select>
+                <input id="dashFrom" type="date" class="input" />
+                <input id="dashTo" type="date" class="input" />
+                <button id="dashApply" class="btn">Aplicar</button>
+              </div>
+            </div>
+            <div id="dashSummary" class="summaryGrid"></div>
+          </div>
+        </section>
+
+        <!-- INVOICES -->
+        <section class="tab hidden" id="tab-invoices">
+          <div class="card">
+            <div class="cardHeader">
+              <h3>Facturas</h3>
+              <div class="row wrap">
+                <input id="invSearch" class="input" placeholder="Buscar por nº factura, cliente o tag…" />
+                <select id="invClientFilter" class="input"></select>
+                <select id="invStatusFilter" class="input">
+                  <option value="all">Todos estados</option>
+                  <option value="Pendiente">Pendiente</option>
+                  <option value="Girada">Girada</option>
+                  <option value="Cobrada">Cobrada</option>
+                </select>
+                <input id="invFrom" type="date" class="input" />
+                <input id="invTo" type="date" class="input" />
+                <button id="invClearFilters" class="btn ghost">Limpiar</button>
+                <button id="btnNewInvoice" class="btn">+ Nueva factura</button>
+              </div>
+            </div>
+
+            <div class="tableWrap">
+              <table class="table">
+                <thead>
+                  <tr>
+                    <th>Fecha</th>
+                    <th>Nº factura</th>
+                    <th>Cliente</th>
+                    <th>Tag</th>
+                    <th class="right">Importe</th>
+                    <th>Estado</th>
+                    <th>Acciones</th>
+                  </tr>
+                </thead>
+                <tbody id="invTbody"></tbody>
+              </table>
+            </div>
+
+            <div class="tableFooter">
+              <div class="muted" id="invCountInfo"></div>
+              <div class="right strong" id="invTotalInfo"></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- CLIENTS -->
+        <section class="tab hidden" id="tab-clients">
+          <div class="grid2">
+            <div class="card">
+              <div class="cardHeader">
+                <h3>Clientes</h3>
+                <button id="btnNewClient" class="btn">+ Nuevo cliente</button>
+              </div>
+              <div class="row">
+                <input id="clientSearch" class="input" placeholder="Buscar cliente…" />
+              </div>
+              <div id="clientList" class="list"></div>
+            </div>
+
+            <div class="card">
+              <div class="cardHeader">
+                <h3>Detalle</h3>
+                <span class="pill">Tags por cliente</span>
+              </div>
+              <div id="clientDetail" class="muted">Selecciona un cliente…</div>
+            </div>
+          </div>
+        </section>
+
+        <!-- REPORTS -->
+        <section class="tab hidden" id="tab-reports">
+          <div class="card">
+            <div class="cardHeader">
+              <h3>Reportes</h3>
+              <div class="row wrap">
+                <select id="repMode" class="input">
+                  <option value="weekly">Semanal</option>
+                  <option value="monthly">Mensual</option>
+                  <option value="custom">Personalizado</option>
+                </select>
+                <input id="repFrom" type="date" class="input" />
+                <input id="repTo" type="date" class="input" />
+                <select id="repClient" class="input"></select>
+                <button id="repRun" class="btn">Generar</button>
+              </div>
+            </div>
+
+            <div id="repOut" class="reportOut"></div>
+          </div>
+        </section>
+
+      </section>
+    </div>
+  </main>
+
+  <!-- MODAL -->
+  <div id="modal" class="modal hidden">
+    <div class="modalCard">
+      <div class="modalHeader">
+        <h3 id="modalTitle">Modal</h3>
+        <button id="modalClose" class="btn ghost">✕</button>
+      </div>
+      <div id="modalBody"></div>
+      <div class="modalFooter" id="modalFooter"></div>
+    </div>
+  </div>
+
+  <!-- FIREBASE (Cloud Sync) -->
+  <!-- ✅ Pega tu config real aquí. Si no, funciona en local igualmente. -->
+  <script>
+    // window.__FIREBASE_CONFIG = {
+    //   apiKey: "XXXX",
+    //   authDomain: "XXXX.firebaseapp.com",
+    //   databaseURL: "https://XXXX-default-rtdb.europe-west1.firebasedatabase.app",
+    //   projectId: "XXXX",
+    //   appId: "XXXX"
+    // };
+  </script>
+
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+
+  <script src="./app.js"></script>
+</body>
+</html>
 
