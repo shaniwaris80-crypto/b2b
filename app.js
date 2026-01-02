@@ -1,17 +1,21 @@
 /* =========================================================
-   ARSLAN • FACTURAS & CONTABILIDAD (V2.6-B FINAL)
-   ✅ Usuarios internos + PIN distinto por persona (ADMIN 7392)
-   ✅ Nube REAL Email/Password (misma nube en todos dispositivos)
-   ✅ Sync automático: guarda TODO (local + cloud)
-   ✅ PDF robusto (jsPDF + AutoTable)
-   ✅ Modo Día por defecto / Noche opcional
-   ✅ Tags por cliente (Braseros: Centro/Severo/Edificio/Tomillares)
-   ✅ Gráficos por cliente (Reportes)
+   ARSLAN PRO • Facturas & Contabilidad (FULL)
+   - Usuarios + PIN distinto por persona (ADMIN 7392)
+   - Clientes + tags por cliente (Braseros Centro/Severo/Edificio/Tomillares)
+   - Facturas: fecha, nº, importe, estado (Pendiente/Girada/Cobrada), tag, notas
+   - Resúmenes por semanas/meses/totales y por periodos
+   - PDF PRO: pendientes / giradas / cobradas (global y por cliente)
+   - Charts avanzados: por tag + tendencia (3 estados)
+   - Firebase Email/Password + Realtime Database (sync total)
+   - Modo día por defecto / noche opcional
 ========================================================= */
 
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => Array.from(document.querySelectorAll(sel));
 
+/* ---------------------------
+   Utils
+--------------------------- */
 const money = (n) => {
   const x = Number(n || 0);
   return x.toLocaleString("es-ES", { style:"currency", currency:"EUR" });
@@ -33,18 +37,9 @@ function parseISODate(s){
   return new Date(y, m-1, d);
 }
 
-function clampDateRange(fromISO, toISO){
-  const from = parseISODate(fromISO);
-  const to = parseISODate(toISO);
-  if(from && to && from > to){
-    return { fromISO: toISO, toISO: fromISO };
-  }
-  return { fromISO, toISO };
-}
-
 function startOfWeek(date){
   const d = new Date(date);
-  const day = (d.getDay()+6)%7; // lunes=0
+  const day = (d.getDay()+6)%7;
   d.setDate(d.getDate() - day);
   d.setHours(0,0,0,0);
   return d;
@@ -68,6 +63,15 @@ function endOfMonth(date){
   const d = new Date(date.getFullYear(), date.getMonth()+1, 0);
   d.setHours(23,59,59,999);
   return d;
+}
+
+function clampDateRange(fromISO, toISO){
+  const from = parseISODate(fromISO);
+  const to = parseISODate(toISO);
+  if(from && to && from > to){
+    return { fromISO: toISO, toISO: fromISO };
+  }
+  return { fromISO, toISO };
 }
 
 function safeText(s){ return String(s ?? "").trim(); }
@@ -102,7 +106,7 @@ function readFileAsText(file){
 }
 
 /* ---------------------------
-   HASH (PIN) - SHA-256
+   SHA-256 (PIN)
 --------------------------- */
 async function sha256Hex(text){
   const enc = new TextEncoder().encode(text);
@@ -112,33 +116,33 @@ async function sha256Hex(text){
 }
 
 /* ---------------------------
-   STORAGE KEYS
+   Storage Keys
 --------------------------- */
 const K = {
-  SESSION_OK: "ARSLAN_SESSION_OK_V26B",
-  SESSION_USER: "ARSLAN_SESSION_USER_V26B",
-  USERS: "ARSLAN_USERS_V26B",
-  THEME: "ARSLAN_THEME_V26B",
-  DATA_PREFIX: "ARSLAN_FACTURAS_DATA_V26B__",
-  CLOUD_EMAIL_LAST: "ARSLAN_CLOUD_EMAIL_LAST_V26B"
+  SESSION_OK: "ARSLAN_SESSION_OK_FULL",
+  SESSION_USER: "ARSLAN_SESSION_USER_FULL",
+  USERS: "ARSLAN_USERS_FULL",
+  THEME: "ARSLAN_THEME_FULL",
+  DATA_PREFIX: "ARSLAN_FACTURAS_DATA_FULL__",
+  CLOUD_EMAIL_LAST: "ARSLAN_CLOUD_EMAIL_LAST_FULL"
 };
 
 const DEFAULT_ADMIN_NAME = "ADMIN";
 const DEFAULT_ADMIN_PIN = "7392";
 
 /* ---------------------------
-   USERS DB (internos)
+   Users internal
 --------------------------- */
-let USERS = []; // {id, name, pinHash, createdAt}
+let USERS = [];
 let ACTIVE_USER_ID = null;
 let ACTIVE_USER_NAME = "";
 
 /* ---------------------------
-   DEFAULT DATA (por usuario interno)
+   Default Data
 --------------------------- */
 function makeDefaultData(){
   return {
-    version: 26,
+    version: 1,
     clients: [
       { id: "cli_riviera", name: "RIVIERA", phone: "", tags: ["RIVIERA"], notes:"" },
       { id: "cli_braseros", name: "RESTAURACION HERMANOS MARIJUÁN (BRASEROS)", phone: "", tags: [
@@ -147,14 +151,22 @@ function makeDefaultData(){
     ],
     invoices: [],
     settings: {
-      currency: "EUR",
-      whatsappTemplate:
+      whatsappTemplatePaid:
 `Hola {cliente},
+✅ Confirmación de cobro
 Factura: {numero}
 Fecha: {fecha}
 Tag: {tag}
 Importe: {importe}
-Estado: PAGADA ✅
+
+Gracias.`,
+      whatsappTemplatePending:
+`Hola {cliente},
+Recordatorio:
+Factura pendiente: {numero}
+Fecha: {fecha}
+Tag: {tag}
+Importe: {importe}
 
 Gracias.`,
     },
@@ -163,7 +175,7 @@ Gracias.`,
 }
 
 /* ---------------------------
-   LOAD/SAVE USERS
+   Load/Save Users
 --------------------------- */
 function loadUsersRaw(){
   const raw = localStorage.getItem(K.USERS);
@@ -198,7 +210,7 @@ async function ensureUsers(){
 }
 
 /* ---------------------------
-   DB per user interno
+   DB per user internal
 --------------------------- */
 let DB = null;
 
@@ -238,7 +250,29 @@ function saveLocalDB(skipCloud=false){
 }
 
 /* =========================================================
-   CLOUD SYNC (EMAIL/PASSWORD REAL)
+   THEME (día por defecto)
+========================================================= */
+const btnTheme = $("#btnTheme");
+
+function getTheme(){
+  return localStorage.getItem(K.THEME) || "light";
+}
+
+function applyTheme(theme){
+  const isLight = theme === "light";
+  document.body.classList.toggle("light", isLight);
+  if(btnTheme) btnTheme.textContent = isLight ? "☀️" : "🌙";
+  localStorage.setItem(K.THEME, theme);
+  setTimeout(()=>updateCharts(), 50);
+}
+
+function toggleTheme(){
+  const t = getTheme();
+  applyTheme(t === "light" ? "dark" : "light");
+}
+
+/* =========================================================
+   CLOUD (Firebase Email/Password + Realtime DB)
 ========================================================= */
 const cloudStatus = $("#cloudStatus");
 const cloudEmail = $("#cloudEmail");
@@ -258,7 +292,6 @@ let FIREBASE_READY = false;
 let CLOUD_READY = false;
 let CLOUD_UID = null;
 let CLOUD_REF = null;
-let CLOUD_LISTENING = false;
 let CLOUD_LOCK = false;
 
 function getFirebase(){
@@ -278,17 +311,13 @@ function getFirebase(){
 }
 
 function buildCloudRef(db){
-  return db.ref("arslan_facturas_v26b/" + CLOUD_UID + "/users/" + ACTIVE_USER_ID + "/data");
+  return db.ref("arslan_facturas_full/" + CLOUD_UID + "/users/" + ACTIVE_USER_ID + "/data");
 }
 
 function attachCloudForActiveUser(db){
   if(!CLOUD_READY || !ACTIVE_USER_ID) return;
 
   CLOUD_REF = buildCloudRef(db);
-
-  if(!CLOUD_LISTENING){
-    CLOUD_LISTENING = true;
-  }
 
   try{ CLOUD_REF.off(); }catch{}
 
@@ -395,10 +424,9 @@ async function cloudLogin(){
     if(cloudPass) cloudPass.value = "";
   }catch(e){
     const code = e?.code || "sin-codigo";
-    const msg = e?.message || "desconocido";
     setCloudStatus("bad", `☁️ Error login: ${code}`);
     console.error("Firebase login error:", e);
-    alert(`Error login:\n${code}\n${msg}`);
+    alert(`Error login:\n${code}\n${e?.message || ""}`);
   }
 }
 
@@ -421,10 +449,9 @@ async function cloudRegister(){
     if(cloudPass) cloudPass.value = "";
   }catch(e){
     const code = e?.code || "sin-codigo";
-    const msg = e?.message || "desconocido";
     setCloudStatus("bad", `☁️ Error registro: ${code}`);
     console.error("Firebase register error:", e);
-    alert(`Error registro:\n${code}\n${msg}`);
+    alert(`Error registro:\n${code}\n${e?.message || ""}`);
   }
 }
 
@@ -443,31 +470,9 @@ async function cloudLogout(){
   }
 }
 
-/* ---------------------------
-   THEME (DÍA / NOCHE)
---------------------------- */
-const btnTheme = $("#btnTheme");
-
-function getTheme(){
-  return localStorage.getItem(K.THEME) || "light";
-}
-
-function applyTheme(theme){
-  const isLight = theme === "light";
-  document.body.classList.toggle("light", isLight);
-  if(btnTheme) btnTheme.textContent = isLight ? "☀️" : "🌙";
-  localStorage.setItem(K.THEME, theme);
-  setTimeout(()=>updateCharts(), 50);
-}
-
-function toggleTheme(){
-  const t = getTheme();
-  applyTheme(t === "light" ? "dark" : "light");
-}
-
-/* ---------------------------
-   SESSION / PIN GATE (usuarios internos)
---------------------------- */
+/* =========================================================
+   SESSION / PIN
+========================================================= */
 const pinGate = $("#pinGate");
 const app = $("#app");
 const userSelect = $("#userSelect");
@@ -485,6 +490,21 @@ function setSessionOk(v){ localStorage.setItem(K.SESSION_OK, v ? "1" : "0"); }
 function getSessionUser(){ return localStorage.getItem(K.SESSION_USER) || ""; }
 function setSessionUser(id){ localStorage.setItem(K.SESSION_USER, id || ""); }
 
+function renderUserSelect(){
+  if(!userSelect) return;
+  userSelect.innerHTML = "";
+  const list = USERS.slice().sort((a,b)=>a.name.localeCompare(b.name));
+  for(const u of list){
+    const o = document.createElement("option");
+    o.value = u.id;
+    o.textContent = u.name;
+    userSelect.appendChild(o);
+  }
+  const remembered = getSessionUser();
+  const exists = list.some(u=>u.id===remembered);
+  userSelect.value = exists ? remembered : (list[0]?.id || "");
+}
+
 function lock(){
   setSessionOk(false);
   app.classList.add("hidden");
@@ -500,22 +520,6 @@ function unlock(){
   pinGate.classList.add("hidden");
   app.classList.remove("hidden");
   if(pinMsg) pinMsg.textContent = "";
-}
-
-function renderUserSelect(){
-  if(!userSelect) return;
-  userSelect.innerHTML = "";
-  const list = USERS.slice().sort((a,b)=>a.name.localeCompare(b.name));
-  for(const u of list){
-    const o = document.createElement("option");
-    o.value = u.id;
-    o.textContent = u.name;
-    userSelect.appendChild(o);
-  }
-
-  const remembered = getSessionUser();
-  const exists = list.some(u=>u.id===remembered);
-  userSelect.value = exists ? remembered : (list[0]?.id || "");
 }
 
 async function checkPin(){
@@ -559,9 +563,9 @@ async function checkPin(){
   }
 }
 
-/* ---------------------------
+/* =========================================================
    NAV / TABS
---------------------------- */
+========================================================= */
 const tabs = {
   dashboard: $("#tab-dashboard"),
   invoices: $("#tab-invoices"),
@@ -582,9 +586,9 @@ function showTab(key){
   }
 }
 
-/* ---------------------------
+/* =========================================================
    MODAL
---------------------------- */
+========================================================= */
 const modal = $("#modal");
 const modalTitle = $("#modalTitle");
 const modalBody = $("#modalBody");
@@ -609,9 +613,9 @@ function closeModal(){ modal?.classList.add("hidden"); }
 modalClose?.addEventListener("click", closeModal);
 modal?.addEventListener("click", (e)=>{ if(e.target === modal) closeModal(); });
 
-/* ---------------------------
+/* =========================================================
    DATA HELPERS
---------------------------- */
+========================================================= */
 function getClientById(id){
   return DB.clients.find(c=>c.id===id) || null;
 }
@@ -665,12 +669,14 @@ function getInvoicesFiltered(opts){
 }
 
 function sumByStatus(invoices){
-  const out = { Pendiente:0, Pagada:0, all:0 };
+  const out = { Pendiente:0, Girada:0, Cobrada:0, all:0, count:0 };
   for(const inv of invoices){
     const amt = Number(inv.amount||0);
     out.all += amt;
+    out.count += 1;
     if(inv.status==="Pendiente") out.Pendiente += amt;
-    if(inv.status==="Pagada") out.Pagada += amt;
+    if(inv.status==="Girada") out.Girada += amt;
+    if(inv.status==="Cobrada") out.Cobrada += amt;
   }
   return out;
 }
@@ -694,9 +700,9 @@ function pendingByClient(search=""){
     .sort((a,b)=>b.pending-a.pending);
 }
 
-/* ---------------------------
+/* =========================================================
    PERIODS
---------------------------- */
+========================================================= */
 function resolvePeriod(sel){
   const now = new Date();
   const todayISO = toISODate(now);
@@ -730,270 +736,9 @@ function resolvePeriod(sel){
   };
 }
 
-/* ---------------------------
-   RENDER: SELECTS
---------------------------- */
-function renderClientSelects(){
-  const fill = (sel, includeAll=true) => {
-    const el = $(sel);
-    if(!el) return;
-    el.innerHTML = "";
-    if(includeAll){
-      const o = document.createElement("option");
-      o.value = "all";
-      o.textContent = "Todos clientes";
-      el.appendChild(o);
-    }
-    for(const c of DB.clients.slice().sort((a,b)=>a.name.localeCompare(b.name))){
-      const o = document.createElement("option");
-      o.value = c.id;
-      o.textContent = c.name;
-      el.appendChild(o);
-    }
-  };
-  fill("#invClientFilter", true);
-  fill("#repClient", true);
-}
-
-/* ---------------------------
-   DASHBOARD
---------------------------- */
-const kpiPendingGlobal = $("#kpiPendingGlobal");
-const kpiPendingCount = $("#kpiPendingCount");
-const kpiPaidGlobal = $("#kpiPaidGlobal");
-const kpiPaidCount = $("#kpiPaidCount");
-
-const pendingByClientList = $("#pendingByClientList");
-const dashSearchClient = $("#dashSearchClient");
-
-const dashPeriod = $("#dashPeriod");
-const dashFrom = $("#dashFrom");
-const dashTo = $("#dashTo");
-const dashApply = $("#dashApply");
-const dashSummary = $("#dashSummary");
-
-const btnPDFPendingGlobalDash = $("#btnPDFPendingGlobalDash");
-const btnPDFPaidGlobalDash = $("#btnPDFPaidGlobalDash");
-
-function renderKPIs(){
-  const sums = sumByStatus(DB.invoices);
-  const pendingCount = DB.invoices.filter(i=>i.status==="Pendiente").length;
-  const paidCount = DB.invoices.filter(i=>i.status==="Pagada").length;
-
-  if(kpiPendingGlobal) kpiPendingGlobal.textContent = money(sums.Pendiente);
-  if(kpiPendingCount) kpiPendingCount.textContent = String(pendingCount);
-  if(kpiPaidGlobal) kpiPaidGlobal.textContent = money(sums.Pagada);
-  if(kpiPaidCount) kpiPaidCount.textContent = String(paidCount);
-}
-
-function renderPendingByClient(){
-  if(!pendingByClientList) return;
-  const rows = pendingByClient(dashSearchClient?.value || "");
-  pendingByClientList.innerHTML = "";
-  if(rows.length===0){
-    const div = document.createElement("div");
-    div.className = "muted";
-    div.textContent = "Sin pendientes por cliente.";
-    pendingByClientList.appendChild(div);
-    return;
-  }
-  for(const r of rows){
-    const el = document.createElement("div");
-    el.className = "item";
-    el.innerHTML = `
-      <div>
-        <div class="name">${escapeHtml(r.name)}</div>
-        <div class="sub">${r.count} factura(s) pendiente(s)</div>
-      </div>
-      <div class="badge bad">${money(r.pending)}</div>
-    `;
-    pendingByClientList.appendChild(el);
-  }
-}
-
-function renderDashSummary(){
-  if(!dashSummary) return;
-  const sel = dashPeriod?.value || "thisWeek";
-  let fromISO="", toISO="";
-  if(sel==="custom"){
-    fromISO = dashFrom?.value || "";
-    toISO = dashTo?.value || "";
-  }else{
-    const p = resolvePeriod(sel);
-    fromISO = p.fromISO;
-    toISO = p.toISO;
-    if(dashFrom) dashFrom.value = fromISO;
-    if(dashTo) dashTo.value = toISO;
-  }
-  const invs = getInvoicesFiltered({ q:"", clientId:"all", status:"all", fromISO, toISO });
-  const sums = sumByStatus(invs);
-
-  dashSummary.innerHTML = "";
-  const boxes = [
-    {t:"Total € (periodo)", v: money(sums.all)},
-    {t:"Pendiente €", v: money(sums.Pendiente)},
-    {t:"Pagada €", v: money(sums.Pagada)},
-    {t:"Facturas (nº)", v: String(invs.length)},
-  ];
-  for(const b of boxes){
-    const div = document.createElement("div");
-    div.className = "sumBox";
-    div.innerHTML = `<div class="t">${b.t}</div><div class="v">${escapeHtml(b.v)}</div>`;
-    dashSummary.appendChild(div);
-  }
-}
-
-/* ---------------------------
-   INVOICES TABLE
---------------------------- */
-const invTbody = $("#invTbody");
-const invSearch = $("#invSearch");
-const invClientFilter = $("#invClientFilter");
-const invStatusFilter = $("#invStatusFilter");
-const invFrom = $("#invFrom");
-const invTo = $("#invTo");
-const invClearFilters = $("#invClearFilters");
-const btnNewInvoice = $("#btnNewInvoice");
-const invCountInfo = $("#invCountInfo");
-const invTotalInfo = $("#invTotalInfo");
-
-function renderInvoices(){
-  if(!invTbody) return;
-
-  const list = getInvoicesFiltered({
-    q: invSearch?.value || "",
-    clientId: invClientFilter?.value || "all",
-    status: invStatusFilter?.value || "all",
-    fromISO: invFrom?.value || "",
-    toISO: invTo?.value || "",
-  });
-
-  invTbody.innerHTML = "";
-  let total = 0;
-
-  for(const inv of list){
-    total += Number(inv.amount||0);
-
-    const badgeCls = inv.status==="Pagada" ? "good" : "bad";
-    const toggleLabel = inv.status==="Pagada" ? "↩︎ Pendiente" : "✅ Pagada";
-    const toggleClass = inv.status==="Pagada" ? "btn ghost" : "btn";
-
-    const tr = document.createElement("tr");
-    tr.innerHTML = `
-      <td>${escapeHtml(inv.dateISO || "")}</td>
-      <td><span class="strong">${escapeHtml(inv.number||"")}</span></td>
-      <td>${escapeHtml(inv.clientNameCache||"")}</td>
-      <td>${escapeHtml(inv.tag||"")}</td>
-      <td class="right">${money(inv.amount||0)}</td>
-      <td><span class="badge ${badgeCls}">${escapeHtml(inv.status||"")}</span></td>
-      <td>
-        <button class="${toggleClass}" data-act="toggle" data-id="${inv.id}">${toggleLabel}</button>
-        <button class="btn ghost" data-act="edit" data-id="${inv.id}">Editar</button>
-        <button class="btn ghost" data-act="msg" data-id="${inv.id}">Mensaje</button>
-        <button class="btn ghost danger" data-act="del" data-id="${inv.id}">Borrar</button>
-      </td>
-    `;
-    invTbody.appendChild(tr);
-  }
-
-  if(invCountInfo) invCountInfo.textContent = `${list.length} factura(s)`;
-  if(invTotalInfo) invTotalInfo.textContent = `Total listado: ${money(total)}`;
-
-  invTbody.querySelectorAll("button[data-act]").forEach(btn=>{
-    btn.addEventListener("click", ()=>{
-      const id = btn.dataset.id;
-      const act = btn.dataset.act;
-      if(act==="toggle") toggleInvoiceStatus(id);
-      if(act==="edit") openInvoiceModal(id);
-      if(act==="msg") openMessageModal(id);
-      if(act==="del") deleteInvoice(id);
-    });
-  });
-}
-
-function toggleInvoiceStatus(id){
-  const inv = DB.invoices.find(x=>x.id===id);
-  if(!inv) return;
-  inv.status = inv.status==="Pagada" ? "Pendiente" : "Pagada";
-  normalizeInvoice(inv);
-  saveLocalDB();
-  renderAll();
-}
-
-function deleteInvoice(id){
-  const inv = DB.invoices.find(x=>x.id===id);
-  if(!inv) return;
-
-  const body = document.createElement("div");
-  body.innerHTML = `
-    <div class="muted">¿Seguro que quieres borrar esta factura?</div>
-    <div style="margin-top:10px" class="item">
-      <div>
-        <div class="name">${escapeHtml(inv.number||"")}</div>
-        <div class="sub">${escapeHtml(inv.clientNameCache||"")} · ${escapeHtml(inv.tag||"")}</div>
-      </div>
-      <div class="badge bad">${money(inv.amount||0)}</div>
-    </div>
-  `;
-
-  const foot = document.createElement("div");
-  foot.className = "row";
-
-  const cancel = document.createElement("button");
-  cancel.className = "btn ghost";
-  cancel.textContent = "Cancelar";
-  cancel.onclick = closeModal;
-
-  const ok = document.createElement("button");
-  ok.className = "btn danger";
-  ok.textContent = "Borrar";
-  ok.onclick = ()=>{
-    DB.invoices = DB.invoices.filter(x=>x.id!==id);
-    saveLocalDB();
-    closeModal();
-    renderAll();
-  };
-
-  foot.appendChild(cancel);
-  foot.appendChild(ok);
-  openModal("Borrar factura", body, foot);
-}
-
-/* ---------------------------
-   TAGS POR CLIENTE
---------------------------- */
-function getTagsForClient(clientId){
-  const c = getClientById(clientId);
-  const tags = Array.isArray(c?.tags) ? c.tags : [];
-  return tags.map(t=>({value:t, label:t}));
-}
-
-function fillTagSelect(tagSelect, clientId, preferValue=""){
-  const opts = getTagsForClient(clientId);
-  tagSelect.innerHTML = "";
-
-  if(opts.length===0){
-    const el = document.createElement("option");
-    el.value = "";
-    el.textContent = "(sin tags)";
-    tagSelect.appendChild(el);
-    return;
-  }
-
-  for(const o of opts){
-    const el = document.createElement("option");
-    el.value = o.value;
-    el.textContent = o.label;
-    tagSelect.appendChild(el);
-  }
-
-  const exists = opts.some(o=>o.value === preferValue);
-  tagSelect.value = exists ? preferValue : opts[0].value;
-}
-
-/* ---------------------------
-   FORM HELPERS
---------------------------- */
+/* =========================================================
+   UI HELPERS
+========================================================= */
 function mkInput(label, type, value){
   const wrap = document.createElement("div");
   const l = document.createElement("div");
@@ -1043,9 +788,279 @@ function mkTextArea(label, value){
   return { wrap, textarea };
 }
 
-/* ---------------------------
-   INVOICE MODAL
---------------------------- */
+/* =========================================================
+   TAGS POR CLIENTE
+========================================================= */
+function getTagsForClient(clientId){
+  const c = getClientById(clientId);
+  const tags = Array.isArray(c?.tags) ? c.tags : [];
+  return tags.map(t=>({value:t, label:t}));
+}
+
+function fillTagSelect(tagSelect, clientId, preferValue=""){
+  const opts = getTagsForClient(clientId);
+  tagSelect.innerHTML = "";
+
+  if(opts.length===0){
+    const el = document.createElement("option");
+    el.value = "";
+    el.textContent = "(sin tags)";
+    tagSelect.appendChild(el);
+    return;
+  }
+
+  for(const o of opts){
+    const el = document.createElement("option");
+    el.value = o.value;
+    el.textContent = o.label;
+    tagSelect.appendChild(el);
+  }
+
+  const exists = opts.some(o=>o.value === preferValue);
+  tagSelect.value = exists ? preferValue : opts[0].value;
+}
+
+/* =========================================================
+   DASHBOARD
+========================================================= */
+const kpiPendingGlobal = $("#kpiPendingGlobal");
+const kpiIssuedGlobal = $("#kpiIssuedGlobal");
+const kpiPaidGlobal = $("#kpiPaidGlobal");
+const kpiCountGlobal = $("#kpiCountGlobal");
+
+const pendingByClientList = $("#pendingByClientList");
+const dashSearchClient = $("#dashSearchClient");
+
+const dashPeriod = $("#dashPeriod");
+const dashFrom = $("#dashFrom");
+const dashTo = $("#dashTo");
+const dashApply = $("#dashApply");
+const dashSummary = $("#dashSummary");
+
+const btnPDFPendingGlobalDash = $("#btnPDFPendingGlobalDash");
+const btnPDFIssuedGlobalDash = $("#btnPDFIssuedGlobalDash");
+const btnPDFPaidGlobalDash = $("#btnPDFPaidGlobalDash");
+
+function renderKPIs(){
+  const sums = sumByStatus(DB.invoices);
+  if(kpiPendingGlobal) kpiPendingGlobal.textContent = money(sums.Pendiente);
+  if(kpiIssuedGlobal) kpiIssuedGlobal.textContent = money(sums.Girada);
+  if(kpiPaidGlobal) kpiPaidGlobal.textContent = money(sums.Cobrada);
+  if(kpiCountGlobal) kpiCountGlobal.textContent = String(sums.count);
+}
+
+function renderPendingByClient(){
+  if(!pendingByClientList) return;
+  const rows = pendingByClient(dashSearchClient?.value || "");
+  pendingByClientList.innerHTML = "";
+  if(rows.length===0){
+    const div = document.createElement("div");
+    div.className = "muted";
+    div.textContent = "Sin pendientes por cliente.";
+    pendingByClientList.appendChild(div);
+    return;
+  }
+  for(const r of rows){
+    const el = document.createElement("div");
+    el.className = "item";
+    el.innerHTML = `
+      <div>
+        <div class="name">${escapeHtml(r.name)}</div>
+        <div class="sub">${r.count} factura(s) pendiente(s)</div>
+      </div>
+      <div class="badge bad">${money(r.pending)}</div>
+    `;
+    pendingByClientList.appendChild(el);
+  }
+}
+
+function renderDashSummary(){
+  if(!dashSummary) return;
+  const sel = dashPeriod?.value || "thisWeek";
+  let fromISO="", toISO="";
+  if(sel==="custom"){
+    fromISO = dashFrom?.value || "";
+    toISO = dashTo?.value || "";
+  }else{
+    const p = resolvePeriod(sel);
+    fromISO = p.fromISO;
+    toISO = p.toISO;
+    if(dashFrom) dashFrom.value = fromISO;
+    if(dashTo) dashTo.value = toISO;
+  }
+
+  const invs = getInvoicesFiltered({ q:"", clientId:"all", status:"all", fromISO, toISO });
+  const sums = sumByStatus(invs);
+
+  dashSummary.innerHTML = "";
+  const boxes = [
+    {t:"Total € (periodo)", v: money(sums.all)},
+    {t:"Pendiente €", v: money(sums.Pendiente)},
+    {t:"Girada €", v: money(sums.Girada)},
+    {t:"Cobrada €", v: money(sums.Cobrada)},
+  ];
+  for(const b of boxes){
+    const div = document.createElement("div");
+    div.className = "sumBox";
+    div.innerHTML = `<div class="t">${b.t}</div><div class="v">${escapeHtml(b.v)}</div>`;
+    dashSummary.appendChild(div);
+  }
+}
+
+/* =========================================================
+   INVOICES TABLE
+========================================================= */
+const invTbody = $("#invTbody");
+const invSearch = $("#invSearch");
+const invClientFilter = $("#invClientFilter");
+const invStatusFilter = $("#invStatusFilter");
+const invFrom = $("#invFrom");
+const invTo = $("#invTo");
+const invClearFilters = $("#invClearFilters");
+const btnNewInvoice = $("#btnNewInvoice");
+const invCountInfo = $("#invCountInfo");
+const invTotalInfo = $("#invTotalInfo");
+
+function statusBadgeClass(st){
+  if(st==="Cobrada") return "good";
+  if(st==="Girada") return "warn";
+  return "bad";
+}
+
+function nextStatus(st){
+  if(st==="Pendiente") return "Girada";
+  if(st==="Girada") return "Cobrada";
+  return "Pendiente";
+}
+
+function renderInvoices(){
+  if(!invTbody) return;
+
+  const list = getInvoicesFiltered({
+    q: invSearch?.value || "",
+    clientId: invClientFilter?.value || "all",
+    status: invStatusFilter?.value || "all",
+    fromISO: invFrom?.value || "",
+    toISO: invTo?.value || "",
+  });
+
+  invTbody.innerHTML = "";
+  let total = 0;
+
+  for(const inv of list){
+    total += Number(inv.amount||0);
+    const badgeCls = statusBadgeClass(inv.status);
+    const btnLabel = `➡️ ${nextStatus(inv.status)}`;
+
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td>${escapeHtml(inv.dateISO || "")}</td>
+      <td><span class="strong">${escapeHtml(inv.number||"")}</span></td>
+      <td>${escapeHtml(inv.clientNameCache||"")}</td>
+      <td>${escapeHtml(inv.tag||"")}</td>
+      <td class="right">${money(inv.amount||0)}</td>
+      <td><span class="badge ${badgeCls}">${escapeHtml(inv.status||"")}</span></td>
+      <td>
+        <button class="btn" data-act="cycle" data-id="${inv.id}">${btnLabel}</button>
+        <button class="btn ghost" data-act="edit" data-id="${inv.id}">Editar</button>
+        <button class="btn ghost" data-act="msg" data-id="${inv.id}">Mensaje</button>
+        <button class="btn ghost danger" data-act="del" data-id="${inv.id}">Borrar</button>
+      </td>
+    `;
+    invTbody.appendChild(tr);
+  }
+
+  if(invCountInfo) invCountInfo.textContent = `${list.length} factura(s)`;
+  if(invTotalInfo) invTotalInfo.textContent = `Total listado: ${money(total)}`;
+
+  invTbody.querySelectorAll("button[data-act]").forEach(btn=>{
+    btn.addEventListener("click", ()=>{
+      const id = btn.dataset.id;
+      const act = btn.dataset.act;
+      if(act==="cycle") cycleInvoiceStatus(id);
+      if(act==="edit") openInvoiceModal(id);
+      if(act==="msg") openMessageModal(id);
+      if(act==="del") deleteInvoice(id);
+    });
+  });
+}
+
+function cycleInvoiceStatus(id){
+  const inv = DB.invoices.find(x=>x.id===id);
+  if(!inv) return;
+  inv.status = nextStatus(inv.status);
+  normalizeInvoice(inv);
+  saveLocalDB();
+  renderAll();
+}
+
+function deleteInvoice(id){
+  const inv = DB.invoices.find(x=>x.id===id);
+  if(!inv) return;
+
+  const body = document.createElement("div");
+  body.innerHTML = `
+    <div class="muted">¿Seguro que quieres borrar esta factura?</div>
+    <div style="margin-top:10px" class="item">
+      <div>
+        <div class="name">${escapeHtml(inv.number||"")}</div>
+        <div class="sub">${escapeHtml(inv.clientNameCache||"")} · ${escapeHtml(inv.tag||"")}</div>
+      </div>
+      <div class="badge bad">${money(inv.amount||0)}</div>
+    </div>
+  `;
+
+  const foot = document.createElement("div");
+  foot.className = "row";
+
+  const cancel = document.createElement("button");
+  cancel.className = "btn ghost";
+  cancel.textContent = "Cancelar";
+  cancel.onclick = closeModal;
+
+  const ok = document.createElement("button");
+  ok.className = "btn danger";
+  ok.textContent = "Borrar";
+  ok.onclick = ()=>{
+    DB.invoices = DB.invoices.filter(x=>x.id!==id);
+    saveLocalDB();
+    closeModal();
+    renderAll();
+  };
+
+  foot.appendChild(cancel);
+  foot.appendChild(ok);
+  openModal("Borrar factura", body, foot);
+}
+
+/* =========================================================
+   SELECTS (clientes)
+========================================================= */
+function renderClientSelects(){
+  const fill = (sel, includeAll=true) => {
+    const el = $(sel);
+    if(!el) return;
+    el.innerHTML = "";
+    if(includeAll){
+      const o = document.createElement("option");
+      o.value = "all";
+      o.textContent = "Todos clientes";
+      el.appendChild(o);
+    }
+    for(const c of DB.clients.slice().sort((a,b)=>a.name.localeCompare(b.name))){
+      const o = document.createElement("option");
+      o.value = c.id;
+      o.textContent = c.name;
+      el.appendChild(o);
+    }
+  };
+  fill("#invClientFilter", true);
+  fill("#repClient", true);
+}
+
+/* =========================================================
+   INVOICE MODAL (crear / editar)
+========================================================= */
 function openInvoiceModal(editId=null){
   const isEdit = !!editId;
   const inv = isEdit ? DB.invoices.find(x=>x.id===editId) : null;
@@ -1076,7 +1091,8 @@ function openInvoiceModal(editId=null){
 
   const status = mkSelect("Estado", [
     {value:"Pendiente",label:"Pendiente"},
-    {value:"Pagada",label:"Pagada"},
+    {value:"Girada",label:"Girada"},
+    {value:"Cobrada",label:"Cobrada"},
   ], inv?.status || "Pendiente");
 
   const notes = mkTextArea("Observaciones", inv?.notes || "");
@@ -1159,9 +1175,9 @@ function openInvoiceModal(editId=null){
   openModal(isEdit ? "Editar factura" : "Nueva factura", body, foot);
 }
 
-/* ---------------------------
-   WHATSAPP MESSAGE
---------------------------- */
+/* =========================================================
+   WHATSAPP MESSAGE (pendiente / cobrada)
+========================================================= */
 function openMessageModal(invId){
   const inv = DB.invoices.find(x=>x.id===invId);
   if(!inv) return;
@@ -1170,7 +1186,10 @@ function openMessageModal(invId){
   const cliente = c?.name || inv.clientNameCache || "";
   const phone = safeText(c?.phone || "");
 
-  const tpl = DB.settings.whatsappTemplate || "";
+  const tpl = (inv.status === "Cobrada")
+    ? (DB.settings.whatsappTemplatePaid || "")
+    : (DB.settings.whatsappTemplatePending || "");
+
   const text = tpl
     .replaceAll("{cliente}", cliente)
     .replaceAll("{numero}", inv.number || "")
@@ -1231,9 +1250,9 @@ function openMessageModal(invId){
   openModal("Mensaje de factura", body, foot);
 }
 
-/* ---------------------------
+/* =========================================================
    CLIENTS UI
---------------------------- */
+========================================================= */
 const btnNewClient = $("#btnNewClient");
 const clientSearch = $("#clientSearch");
 const clientList = $("#clientList");
@@ -1286,13 +1305,8 @@ function renderClientDetail(){
     return;
   }
 
-  const pendingInv = DB.invoices.filter(i=>i.clientId===c.id && i.status==="Pendiente");
-  const paidInv = DB.invoices.filter(i=>i.clientId===c.id && i.status==="Pagada");
-
-  const sums = {
-    pending: pendingInv.reduce((s,i)=>s+Number(i.amount||0),0),
-    paid: paidInv.reduce((s,i)=>s+Number(i.amount||0),0),
-  };
+  const invs = DB.invoices.filter(i=>i.clientId===c.id);
+  const sums = sumByStatus(invs);
 
   const wrap = document.createElement("div");
   wrap.className = "reportOut";
@@ -1305,8 +1319,9 @@ function renderClientDetail(){
       <div class="sub">${escapeHtml(c.notes||"")}</div>
     </div>
     <div class="row wrap">
-      <span class="badge bad">Pend: ${money(sums.pending)}</span>
-      <span class="badge good">Pagada: ${money(sums.paid)}</span>
+      <span class="badge bad">Pend: ${money(sums.Pendiente)}</span>
+      <span class="badge warn">Girada: ${money(sums.Girada)}</span>
+      <span class="badge good">Cobrada: ${money(sums.Cobrada)}</span>
     </div>
   `;
 
@@ -1328,16 +1343,21 @@ function renderClientDetail(){
   pdfPend.textContent = "📄 PDF Pendientes";
   pdfPend.onclick = ()=>generateStatusPDF("Pendiente", "client", c.id);
 
+  const pdfIssued = document.createElement("button");
+  pdfIssued.className = "btn ghost";
+  pdfIssued.textContent = "📄 PDF Giradas";
+  pdfIssued.onclick = ()=>generateStatusPDF("Girada", "client", c.id);
+
   const pdfPaid = document.createElement("button");
   pdfPaid.className = "btn ghost";
-  pdfPaid.textContent = "📄 PDF Pagadas";
-  pdfPaid.onclick = ()=>generateStatusPDF("Pagada", "client", c.id);
+  pdfPaid.textContent = "📄 PDF Cobradas";
+  pdfPaid.onclick = ()=>generateStatusPDF("Cobrada", "client", c.id);
 
-  actions.append(edit, addTag, pdfPend, pdfPaid);
+  actions.append(edit, addTag, pdfPend, pdfIssued, pdfPaid);
 
   const tip = document.createElement("div");
   tip.className = "muted";
-  tip.textContent = "Gráficos avanzados están en Reportes → selecciona este cliente y el periodo.";
+  tip.textContent = "Gráficos avanzados: ve a Reportes, selecciona cliente y periodo.";
 
   wrap.append(top, actions, tip);
   if(clientDetail){
@@ -1354,7 +1374,7 @@ function openClientModal(editId=null){
   body.className = "formGrid";
 
   const name = mkInput("Nombre cliente", "text", c?.name || "");
-  const phone = mkInput("Teléfono (WhatsApp opcional)", "text", c?.phone || "");
+  const phone = mkInput("Teléfono (WhatsApp)", "text", c?.phone || "");
   const notes = mkTextArea("Notas", c?.notes || "");
   notes.wrap.classList.add("full");
 
@@ -1439,9 +1459,9 @@ function openAddTagModal(clientId){
   openModal("Añadir tag", body, foot);
 }
 
-/* ---------------------------
+/* =========================================================
    REPORTS
---------------------------- */
+========================================================= */
 const repMode = $("#repMode");
 const repFrom = $("#repFrom");
 const repTo = $("#repTo");
@@ -1451,6 +1471,8 @@ const repOut = $("#repOut");
 
 const btnPDFPendingGlobal = $("#btnPDFPendingGlobal");
 const btnPDFPendingClient = $("#btnPDFPendingClient");
+const btnPDFIssuedGlobal = $("#btnPDFIssuedGlobal");
+const btnPDFIssuedClient = $("#btnPDFIssuedClient");
 const btnPDFPaidGlobal = $("#btnPDFPaidGlobal");
 const btnPDFPaidClient = $("#btnPDFPaidClient");
 
@@ -1495,7 +1517,8 @@ function runReports(){
     </div>
     <div class="row wrap">
       <span class="badge bad">Pend: ${money(sums.Pendiente)}</span>
-      <span class="badge good">Pagada: ${money(sums.Pagada)}</span>
+      <span class="badge warn">Girada: ${money(sums.Girada)}</span>
+      <span class="badge good">Cobrada: ${money(sums.Cobrada)}</span>
       <span class="badge">Total: ${money(sums.all)}</span>
     </div>
   `;
@@ -1504,9 +1527,9 @@ function runReports(){
   updateCharts();
 }
 
-/* ---------------------------
-   PDF (ROBUSTO)
---------------------------- */
+/* =========================================================
+   PDF (jsPDF + AutoTable)
+========================================================= */
 function ensurePDFLibs(){
   const hasUMD = !!window.jspdf;
   const hasJsPDF = hasUMD && typeof window.jspdf.jsPDF === "function";
@@ -1585,7 +1608,7 @@ function generateStatusPDF(statusWanted, scope="global", clientId=null){
 
     doc.setFont("helvetica","bold");
     doc.setFontSize(16);
-    doc.text("ARSLAN • Reporte", margin, 52);
+    doc.text("ARSLAN PRO • Reporte", margin, 52);
 
     doc.setFontSize(13);
     doc.text(title, margin, 74);
@@ -1699,9 +1722,9 @@ function generateStatusPDF(statusWanted, scope="global", clientId=null){
   }
 }
 
-/* ---------------------------
+/* =========================================================
    CHARTS (Chart.js)
---------------------------- */
+========================================================= */
 let chartByTag = null;
 let chartTrend = null;
 
@@ -1715,12 +1738,7 @@ function ensureCharts(){
     chartByTag = new Chart(chartByTagCanvas, {
       type: "bar",
       data: { labels: [], datasets: [{ label: "Importe (€)", data: [] }] },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: { legend: { display: true } },
-        scales: { y: { ticks: { callback: (v)=>Number(v).toLocaleString("es-ES") } } }
-      }
+      options: { responsive:true, maintainAspectRatio:false, plugins:{legend:{display:true}} }
     });
   }
 
@@ -1731,15 +1749,11 @@ function ensureCharts(){
         labels: [],
         datasets: [
           { label: "Pendiente (€)", data: [], tension: 0.25 },
-          { label: "Pagada (€)", data: [], tension: 0.25 },
+          { label: "Girada (€)", data: [], tension: 0.25 },
+          { label: "Cobrada (€)", data: [], tension: 0.25 },
         ]
       },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: { legend: { display: true } },
-        scales: { y: { ticks: { callback: (v)=>Number(v).toLocaleString("es-ES") } } }
-      }
+      options: { responsive:true, maintainAspectRatio:false, plugins:{legend:{display:true}} }
     });
   }
 }
@@ -1763,6 +1777,7 @@ function bucketLabel(date, mode){
 
 function buildTrendBuckets(invs, mode){
   const mapPend = new Map();
+  const mapIss = new Map();
   const mapPaid = new Map();
 
   for(const inv of invs){
@@ -1771,14 +1786,12 @@ function buildTrendBuckets(invs, mode){
     const key = bucketLabel(d, mode);
     const amt = Number(inv.amount||0);
 
-    if(inv.status==="Pendiente"){
-      mapPend.set(key, (mapPend.get(key)||0) + amt);
-    }else if(inv.status==="Pagada"){
-      mapPaid.set(key, (mapPaid.get(key)||0) + amt);
-    }
+    if(inv.status==="Pendiente") mapPend.set(key, (mapPend.get(key)||0) + amt);
+    else if(inv.status==="Girada") mapIss.set(key, (mapIss.get(key)||0) + amt);
+    else if(inv.status==="Cobrada") mapPaid.set(key, (mapPaid.get(key)||0) + amt);
   }
 
-  const keys = new Set([...mapPend.keys(), ...mapPaid.keys()]);
+  const keys = new Set([...mapPend.keys(), ...mapIss.keys(), ...mapPaid.keys()]);
   const arr = Array.from(keys);
 
   const sortBy = (k)=>{
@@ -1792,9 +1805,12 @@ function buildTrendBuckets(invs, mode){
 
   arr.sort((a,b)=>sortBy(a)-sortBy(b));
 
-  const pend = arr.map(k=> mapPend.get(k)||0);
-  const paid = arr.map(k=> mapPaid.get(k)||0);
-  return { labels: arr, pend, paid };
+  return {
+    labels: arr,
+    pend: arr.map(k=>mapPend.get(k)||0),
+    iss: arr.map(k=>mapIss.get(k)||0),
+    paid: arr.map(k=>mapPaid.get(k)||0),
+  };
 }
 
 function buildByTag(invs){
@@ -1828,13 +1844,14 @@ function updateCharts(){
   const tr = buildTrendBuckets(invs, mode==="monthly" ? "monthly" : "weekly");
   chartTrend.data.labels = tr.labels;
   chartTrend.data.datasets[0].data = tr.pend;
-  chartTrend.data.datasets[1].data = tr.paid;
+  chartTrend.data.datasets[1].data = tr.iss;
+  chartTrend.data.datasets[2].data = tr.paid;
   chartTrend.update();
 }
 
-/* ---------------------------
-   USERS TAB (crear / cambiar PIN / borrar)
---------------------------- */
+/* =========================================================
+   USERS TAB
+========================================================= */
 const btnNewUser = $("#btnNewUser");
 const usersList = $("#usersList");
 
@@ -1974,7 +1991,7 @@ function openDeleteUserModal(userId){
   body.innerHTML = `
     <div class="muted">¿Borrar usuario <b>${escapeHtml(u.name)}</b>?</div>
     <div class="muted" style="margin-top:8px">
-      Esto elimina el usuario del login interno (PIN). Sus datos locales quedan en el navegador, y la nube (si existe) queda en Firebase.
+      El usuario desaparece del login interno. Los datos quedan en el navegador y en Firebase.
     </div>
   `;
 
@@ -2002,9 +2019,9 @@ function openDeleteUserModal(userId){
   openModal("Borrar usuario", body, foot);
 }
 
-/* ---------------------------
+/* =========================================================
    EXPORT / IMPORT / RESET
---------------------------- */
+========================================================= */
 const btnExport = $("#btnExport");
 const fileImport = $("#fileImport");
 const btnClearLocal = $("#btnClearLocal");
@@ -2025,7 +2042,7 @@ async function doImport(file){
 
 function resetLocal(){
   const body = document.createElement("div");
-  body.innerHTML = `<div class="muted">Esto borra el almacenamiento local <b>del usuario activo</b> y restaura datos iniciales. Si la nube está conectada, se volverá a sincronizar después.</div>`;
+  body.innerHTML = `<div class="muted">Esto borra el almacenamiento local <b>del usuario activo</b> y restaura datos iniciales. Si la nube está conectada, luego sincroniza.</div>`;
 
   const foot = document.createElement("div");
   foot.className="row";
@@ -2051,9 +2068,9 @@ function resetLocal(){
   openModal("Reset local (usuario activo)", body, foot);
 }
 
-/* ---------------------------
+/* =========================================================
    MAIN RENDER
---------------------------- */
+========================================================= */
 function renderAll(){
   if(activeUserLabel) activeUserLabel.textContent = ACTIVE_USER_NAME || "";
   if(activeUserLabel2) activeUserLabel2.textContent = ACTIVE_USER_NAME || "";
@@ -2070,23 +2087,20 @@ function renderAll(){
   pushCloud();
 }
 
-/* ---------------------------
+/* =========================================================
    EVENTS
---------------------------- */
+========================================================= */
 function bindEvents(){
-  btnTheme?.addEventListener("click", toggleTheme);
+  $("#btnTheme")?.addEventListener("click", toggleTheme);
 
-  // PIN
   pinBtn?.addEventListener("click", checkPin);
   pinInput?.addEventListener("keydown",(e)=>{ if(e.key==="Enter") checkPin(); });
   btnLock?.addEventListener("click", lock);
 
-  // NAV
   $$(".navItem[data-tab]").forEach(btn=>{
     btn.addEventListener("click", ()=>showTab(btn.dataset.tab));
   });
 
-  // Open Cloud Account (direct)
   $("#btnOpenCloudAccount")?.addEventListener("click", ()=>{
     showTab("users");
     setTimeout(()=>cloudEmail?.focus(), 60);
@@ -2096,7 +2110,6 @@ function bindEvents(){
     setTimeout(()=>cloudEmail?.focus(), 60);
   });
 
-  // Dashboard
   dashSearchClient?.addEventListener("input", renderPendingByClient);
   dashApply?.addEventListener("click", renderDashSummary);
   dashPeriod?.addEventListener("change", ()=>{
@@ -2107,9 +2120,9 @@ function bindEvents(){
   });
 
   btnPDFPendingGlobalDash?.addEventListener("click", ()=>generateStatusPDF("Pendiente", "global"));
-  btnPDFPaidGlobalDash?.addEventListener("click", ()=>generateStatusPDF("Pagada", "global"));
+  btnPDFIssuedGlobalDash?.addEventListener("click", ()=>generateStatusPDF("Girada", "global"));
+  btnPDFPaidGlobalDash?.addEventListener("click", ()=>generateStatusPDF("Cobrada", "global"));
 
-  // Invoices filters
   const rerInv = ()=>renderInvoices();
   invSearch?.addEventListener("input", rerInv);
   invClientFilter?.addEventListener("change", rerInv);
@@ -2128,11 +2141,9 @@ function bindEvents(){
 
   btnNewInvoice?.addEventListener("click", ()=>openInvoiceModal(null));
 
-  // Clients
   btnNewClient?.addEventListener("click", ()=>openClientModal(null));
   clientSearch?.addEventListener("input", renderClients);
 
-  // Reports
   repRun?.addEventListener("click", runReports);
   repMode?.addEventListener("change", ()=>{
     const now = new Date();
@@ -2155,17 +2166,23 @@ function bindEvents(){
     if(!id || id==="all"){ alert("Selecciona un cliente."); return; }
     generateStatusPDF("Pendiente", "client", id);
   });
-  btnPDFPaidGlobal?.addEventListener("click", ()=>generateStatusPDF("Pagada", "global"));
+
+  btnPDFIssuedGlobal?.addEventListener("click", ()=>generateStatusPDF("Girada", "global"));
+  btnPDFIssuedClient?.addEventListener("click", ()=>{
+    const id = repClient?.value || "all";
+    if(!id || id==="all"){ alert("Selecciona un cliente."); return; }
+    generateStatusPDF("Girada", "client", id);
+  });
+
+  btnPDFPaidGlobal?.addEventListener("click", ()=>generateStatusPDF("Cobrada", "global"));
   btnPDFPaidClient?.addEventListener("click", ()=>{
     const id = repClient?.value || "all";
     if(!id || id==="all"){ alert("Selecciona un cliente."); return; }
-    generateStatusPDF("Pagada", "client", id);
+    generateStatusPDF("Cobrada", "client", id);
   });
 
-  // Users
   btnNewUser?.addEventListener("click", openNewUserModal);
 
-  // Export/Import/Reset
   btnExport?.addEventListener("click", ()=>{
     const stamp = new Date();
     downloadJSON(DB, `facturas_${ACTIVE_USER_NAME || "usuario"}_${toISODate(stamp)}.json`);
@@ -2186,15 +2203,14 @@ function bindEvents(){
 
   btnClearLocal?.addEventListener("click", resetLocal);
 
-  // Cloud buttons
   btnCloudLogin?.addEventListener("click", cloudLogin);
   btnCloudRegister?.addEventListener("click", cloudRegister);
   btnCloudLogout?.addEventListener("click", cloudLogout);
 }
 
-/* ---------------------------
+/* =========================================================
    INIT
---------------------------- */
+========================================================= */
 (async function init(){
   applyTheme(getTheme());
   await ensureUsers();
@@ -2237,7 +2253,6 @@ function bindEvents(){
     lock();
   }
 
-  // Prefill last email
   const lastEmail = localStorage.getItem(K.CLOUD_EMAIL_LAST) || "";
   if(cloudEmail && !cloudEmail.value && lastEmail) cloudEmail.value = lastEmail;
 })();
