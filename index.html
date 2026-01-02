@@ -19,12 +19,12 @@
       <div class="logo">A</div>
       <div class="brandText">
         <div class="title">ARSLAN • Facturas</div>
-        <div class="subtitle">Clientes · Tags · Estados · Semanas/Meses · PDF · Nube</div>
+        <div class="subtitle">Estados por cliente · semanas · meses · nube · PDF</div>
       </div>
     </div>
 
     <div class="topbarRight">
-      <button id="btnTheme" class="btn ghost" title="Modo Día / Noche">☀️</button>
+      <button id="btnTheme" class="btn ghost" title="Modo Día/Noche">☀️</button>
       <div id="cloudStatus" class="cloud-pill warn">☁️ Conectando…</div>
       <button id="btnLock" class="btn ghost" title="Bloquear">🔒</button>
     </div>
@@ -35,10 +35,12 @@
     <div class="gateCard">
       <h2>Acceso protegido</h2>
       <p class="muted">Introduce tu PIN para entrar al sistema.</p>
+
       <div class="gateRow">
         <input id="pinInput" type="password" inputmode="numeric" autocomplete="one-time-code" placeholder="PIN" />
         <button id="pinBtn" class="btn">Entrar</button>
       </div>
+
       <div id="pinMsg" class="msg"></div>
       <div class="hint muted">Tip: puedes bloquear con 🔒 arriba.</div>
     </div>
@@ -54,7 +56,9 @@
         <button class="navItem" data-tab="invoices">🧾 Facturas</button>
         <button class="navItem" data-tab="clients">👥 Clientes</button>
         <button class="navItem" data-tab="reports">📈 Reportes</button>
+
         <div class="sep"></div>
+
         <button id="btnExport" class="navItem">⬇️ Exportar JSON</button>
         <label class="navItem fileLabel">
           ⬆️ Importar JSON
@@ -71,8 +75,8 @@
           <div class="grid2">
             <div class="card">
               <div class="cardHeader">
-                <h3>Pendientes (global)</h3>
-                <span class="pill">Siempre visible</span>
+                <h3>Global</h3>
+                <span class="pill">Pendientes y pagadas</span>
               </div>
 
               <div class="kpis">
@@ -85,17 +89,22 @@
                   <div id="kpiPendingCount" class="kValue">0</div>
                 </div>
                 <div class="kpi">
-                  <div class="kLabel">Giradas €</div>
-                  <div id="kpiGiradaGlobal" class="kValue">0,00 €</div>
-                </div>
-                <div class="kpi">
                   <div class="kLabel">Pagadas €</div>
                   <div id="kpiPaidGlobal" class="kValue">0,00 €</div>
+                </div>
+                <div class="kpi">
+                  <div class="kLabel">Pagadas (nº)</div>
+                  <div id="kpiPaidCount" class="kValue">0</div>
                 </div>
               </div>
 
               <div class="row wrap" style="margin-top:12px;">
                 <button id="btnPDFPendingGlobalDash" class="btn">📄 PDF Pendientes Global</button>
+                <button id="btnPDFPaidGlobalDash" class="btn ghost">📄 PDF Pagadas Global</button>
+              </div>
+
+              <div class="muted" style="margin-top:10px;">
+                Si el PDF no abre, revisa que tu navegador permita descargas y que no bloquee scripts CDN.
               </div>
             </div>
 
@@ -113,7 +122,7 @@
           <div class="card">
             <div class="cardHeader">
               <h3>Resumen por periodo</h3>
-              <div class="row wrap">
+              <div class="row">
                 <select id="dashPeriod" class="input">
                   <option value="thisWeek">Esta semana</option>
                   <option value="lastWeek">Semana pasada</option>
@@ -143,8 +152,7 @@
                 <select id="invStatusFilter" class="input">
                   <option value="all">Todos estados</option>
                   <option value="Pendiente">Pendiente</option>
-                  <option value="Girada">Girada</option>
-                  <option value="Cobrada">Pagada</option>
+                  <option value="Pagada">Pagada</option>
                 </select>
                 <input id="invFrom" type="date" class="input" />
                 <input id="invTo" type="date" class="input" />
@@ -194,7 +202,7 @@
             <div class="card">
               <div class="cardHeader">
                 <h3>Detalle</h3>
-                <span class="pill">Tags por cliente</span>
+                <span class="pill">PDF por cliente</span>
               </div>
               <div id="clientDetail" class="muted">Selecciona un cliente…</div>
             </div>
@@ -222,6 +230,8 @@
             <div class="row wrap" style="margin-top:12px;">
               <button id="btnPDFPendingGlobal" class="btn">📄 PDF Pendientes Global</button>
               <button id="btnPDFPendingClient" class="btn ghost">📄 PDF Pendientes Cliente</button>
+              <button id="btnPDFPaidGlobal" class="btn ghost">📄 PDF Pagadas Global</button>
+              <button id="btnPDFPaidClient" class="btn ghost">📄 PDF Pagadas Cliente</button>
             </div>
 
             <div id="repOut" class="reportOut"></div>
@@ -244,7 +254,7 @@
     </div>
   </div>
 
-  <!-- FIREBASE CONFIG (rellena tu config real) -->
+  <!-- FIREBASE (Cloud Sync) -->
   <script>
     // window.__FIREBASE_CONFIG = {
     //   apiKey: "XXXX",
@@ -255,16 +265,14 @@
     // };
   </script>
 
-  <!-- Firebase compat -->
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
 
-  <!-- PDF libs (IMPORTANTE el orden) -->
+  <!-- PDF: jsPDF + AutoTable -->
   <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js"></script>
 
   <script src="./app.js"></script>
 </body>
 </html>
-
