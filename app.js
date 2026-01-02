@@ -1,10 +1,12 @@
 /* =========================================================
-   ARSLAN • FACTURAS & CONTABILIDAD (V2.4)
-   ✅ Usuarios + PIN distinto por persona (datos separados)
-   ✅ Gráficos avanzados por cliente (tags + tendencia)
-   ✅ Modo Día por defecto / Noche opcional
+   ARSLAN • FACTURAS & CONTABILIDAD (V2.6-B FINAL)
+   ✅ Usuarios internos + PIN distinto por persona (ADMIN 7392)
+   ✅ Nube REAL Email/Password (misma nube en todos dispositivos)
+   ✅ Sync automático: guarda TODO (local + cloud)
    ✅ PDF robusto (jsPDF + AutoTable)
-   ✅ Cloud Sync Firebase (opcional) por usuario
+   ✅ Modo Día por defecto / Noche opcional
+   ✅ Tags por cliente (Braseros: Centro/Severo/Edificio/Tomillares)
+   ✅ Gráficos por cliente (Reportes)
 ========================================================= */
 
 const $ = (sel) => document.querySelector(sel);
@@ -113,31 +115,30 @@ async function sha256Hex(text){
    STORAGE KEYS
 --------------------------- */
 const K = {
-  SESSION_OK: "ARSLAN_SESSION_OK_V24",
-  SESSION_USER: "ARSLAN_SESSION_USER_V24",
-  USERS: "ARSLAN_USERS_V24",
-  THEME: "ARSLAN_THEME_V24",
-  CLOUD_LAST_PUSH: "ARSLAN_CLOUD_LAST_PUSH_V24",
-  // DB per user: `${K.DATA_PREFIX}${userId}`
-  DATA_PREFIX: "ARSLAN_FACTURAS_DATA_V24__",
+  SESSION_OK: "ARSLAN_SESSION_OK_V26B",
+  SESSION_USER: "ARSLAN_SESSION_USER_V26B",
+  USERS: "ARSLAN_USERS_V26B",
+  THEME: "ARSLAN_THEME_V26B",
+  DATA_PREFIX: "ARSLAN_FACTURAS_DATA_V26B__",
+  CLOUD_EMAIL_LAST: "ARSLAN_CLOUD_EMAIL_LAST_V26B"
 };
 
 const DEFAULT_ADMIN_NAME = "ADMIN";
 const DEFAULT_ADMIN_PIN = "7392";
 
 /* ---------------------------
-   USERS DB (separado de facturas)
+   USERS DB (internos)
 --------------------------- */
 let USERS = []; // {id, name, pinHash, createdAt}
 let ACTIVE_USER_ID = null;
 let ACTIVE_USER_NAME = "";
 
 /* ---------------------------
-   DEFAULT DATA (por usuario)
+   DEFAULT DATA (por usuario interno)
 --------------------------- */
 function makeDefaultData(){
   return {
-    version: 24,
+    version: 26,
     clients: [
       { id: "cli_riviera", name: "RIVIERA", phone: "", tags: ["RIVIERA"], notes:"" },
       { id: "cli_braseros", name: "RESTAURACION HERMANOS MARIJUÁN (BRASEROS)", phone: "", tags: [
@@ -186,8 +187,6 @@ async function ensureUsers(){
     USERS = loaded;
     return;
   }
-
-  // crear ADMIN inicial
   const adminHash = await sha256Hex(DEFAULT_ADMIN_PIN);
   USERS = [{
     id: "usr_admin",
@@ -199,7 +198,7 @@ async function ensureUsers(){
 }
 
 /* ---------------------------
-   DB per user
+   DB per user interno
 --------------------------- */
 let DB = null;
 
@@ -238,10 +237,16 @@ function saveLocalDB(skipCloud=false){
   if(!skipCloud) pushCloud();
 }
 
-/* ---------------------------
-   CLOUD SYNC (FIREBASE) por usuario
---------------------------- */
+/* =========================================================
+   CLOUD SYNC (EMAIL/PASSWORD REAL)
+========================================================= */
 const cloudStatus = $("#cloudStatus");
+const cloudEmail = $("#cloudEmail");
+const cloudPass = $("#cloudPass");
+const btnCloudLogin = $("#btnCloudLogin");
+const btnCloudRegister = $("#btnCloudRegister");
+const btnCloudLogout = $("#btnCloudLogout");
+const cloudUidLabel = $("#cloudUidLabel");
 
 function setCloudStatus(type, text){
   if(!cloudStatus) return;
@@ -249,103 +254,42 @@ function setCloudStatus(type, text){
   cloudStatus.textContent = text;
 }
 
+let FIREBASE_READY = false;
 let CLOUD_READY = false;
 let CLOUD_UID = null;
 let CLOUD_REF = null;
 let CLOUD_LISTENING = false;
 let CLOUD_LOCK = false;
 
-function buildCloudRef(db){
-  // cada usuario tiene su nodo:
-  // arslan_facturas_v24/<firebaseAnonUid>/users/<ACTIVE_USER_ID>/data
-  return db.ref("arslan_facturas_v24/" + CLOUD_UID + "/users/" + ACTIVE_USER_ID + "/data");
-}
-
-/* ===============================
-   FIREBASE INIT SAFE (UNA VEZ)
-=============================== */
 function getFirebase(){
   if(!window.__FIREBASE_CONFIG) return null;
-  if(!firebase.apps || firebase.apps.length===0){
-    firebase.initializeApp(window.__FIREBASE_CONFIG);
-  }
-  return { auth: firebase.auth(), db: firebase.database() };
-}
-
-/* ===============================
-   INIT CLOUD (EMAIL/PASSWORD)
-=============================== */
-function initCloud(){
-  const fb = getFirebase();
-  if(!fb){
-    setCloudStatus("bad","☁️ Nube: no configurada");
-    return;
-  }
-
-  setCloudStatus("warn","☁️ Nube: esperando login…");
-
-  fb.auth.onAuthStateChanged(user=>{
-    if(!user){
-      CLOUD_READY = false;
-      CLOUD_UID = null;
-      setCloudStatus("warn","☁️ Nube: sin sesión");
-      return;
-    }
-
-    CLOUD_UID = user.uid;
-    CLOUD_READY = true;
-    setCloudStatus("ok","☁️ Nube online");
-
-    if(ACTIVE_USER_ID){
-      attachCloudForActiveUser(fb.db);
-    }
-  });
-}
-
-/* ===============================
-   CLOUD LOGIN / REGISTER (EMAIL/PASS)
-=============================== */
-async function cloudLogin(email, pass){
-  const fb = getFirebase();
-  if(!fb){ alert("Falta configurar Firebase"); return; }
-
   try{
-    await fb.auth.signInWithEmailAndPassword(email, pass);
+    if(!firebase.apps || firebase.apps.length === 0){
+      firebase.initializeApp(window.__FIREBASE_CONFIG);
+    }
+    return {
+      auth: firebase.auth(),
+      db: firebase.database()
+    };
   }catch(e){
-    const code = e?.code || "sin-codigo";
-    const msg  = e?.message || "desconocido";
-    setCloudStatus("bad", `☁️ Error login: ${code}`);
-    console.error(e);
-    alert(`Error login:\n${code}\n${msg}`);
+    console.error("Firebase init error:", e);
+    return null;
   }
 }
 
-async function cloudRegister(email, pass){
-  const fb = getFirebase();
-  if(!fb){ alert("Falta configurar Firebase"); return; }
-
-  try{
-    await fb.auth.createUserWithEmailAndPassword(email, pass);
-  }catch(e){
-    const code = e?.code || "sin-codigo";
-    const msg  = e?.message || "desconocido";
-    setCloudStatus("bad", `☁️ Error registro: ${code}`);
-    console.error(e);
-    alert(`Error registro:\n${code}\n${msg}`);
-  }
+function buildCloudRef(db){
+  return db.ref("arslan_facturas_v26b/" + CLOUD_UID + "/users/" + ACTIVE_USER_ID + "/data");
 }
 
-function attachCloudForActiveUser(dbInstance){
+function attachCloudForActiveUser(db){
   if(!CLOUD_READY || !ACTIVE_USER_ID) return;
 
-  const db = dbInstance || firebase.database();
   CLOUD_REF = buildCloudRef(db);
 
   if(!CLOUD_LISTENING){
     CLOUD_LISTENING = true;
   }
 
-  // re-enganchar listener (limpio por si cambiaron de usuario)
   try{ CLOUD_REF.off(); }catch{}
 
   CLOUD_REF.on("value", snap=>{
@@ -364,7 +308,6 @@ function attachCloudForActiveUser(dbInstance){
     }
   });
 
-  // primer sync
   CLOUD_REF.get().then(snap=>{
     const remote = snap.val();
     if(!remote){
@@ -383,9 +326,7 @@ function attachCloudForActiveUser(dbInstance){
       }
     }
   }).catch((e)=>{
-    const code = e?.code || "sin-codigo";
-    setCloudStatus("bad", `☁️ Error sync: ${code}`);
-    console.error("Cloud get error", e);
+    console.error("Cloud get error:", e);
   });
 }
 
@@ -394,8 +335,112 @@ function pushCloud(){
   if(CLOUD_LOCK) return;
   try{
     CLOUD_REF.set(DB);
-    localStorage.setItem(K.CLOUD_LAST_PUSH, String(Date.now()));
-  }catch{}
+  }catch(e){
+    console.error("Cloud push error:", e);
+  }
+}
+
+function initCloud(){
+  const fb = getFirebase();
+  if(!fb){
+    setCloudStatus("bad","☁️ Nube: no configurada");
+    FIREBASE_READY = false;
+    CLOUD_READY = false;
+    CLOUD_UID = null;
+    if(cloudUidLabel) cloudUidLabel.textContent = "—";
+    return;
+  }
+
+  FIREBASE_READY = true;
+  setCloudStatus("warn","☁️ Nube: sin sesión");
+
+  fb.auth.onAuthStateChanged(user=>{
+    if(!user){
+      CLOUD_READY = false;
+      CLOUD_UID = null;
+      CLOUD_REF = null;
+      setCloudStatus("warn","☁️ Nube: sin sesión");
+      if(cloudUidLabel) cloudUidLabel.textContent = "—";
+      return;
+    }
+
+    CLOUD_UID = user.uid;
+    CLOUD_READY = true;
+    setCloudStatus("ok","☁️ Nube online");
+    if(cloudUidLabel) cloudUidLabel.textContent = CLOUD_UID;
+
+    if(ACTIVE_USER_ID && DB){
+      attachCloudForActiveUser(fb.db);
+      pushCloud();
+    }
+  });
+}
+
+async function cloudLogin(){
+  const fb = getFirebase();
+  if(!fb){
+    alert("Falta configurar Firebase (window.__FIREBASE_CONFIG).");
+    return;
+  }
+  const email = safeText(cloudEmail?.value || "");
+  const pass = safeText(cloudPass?.value || "");
+  if(!email || !pass){
+    alert("Introduce email y password.");
+    return;
+  }
+  setCloudStatus("warn","☁️ Entrando…");
+  try{
+    await fb.auth.signInWithEmailAndPassword(email, pass);
+    localStorage.setItem(K.CLOUD_EMAIL_LAST, email);
+    if(cloudPass) cloudPass.value = "";
+  }catch(e){
+    const code = e?.code || "sin-codigo";
+    const msg = e?.message || "desconocido";
+    setCloudStatus("bad", `☁️ Error login: ${code}`);
+    console.error("Firebase login error:", e);
+    alert(`Error login:\n${code}\n${msg}`);
+  }
+}
+
+async function cloudRegister(){
+  const fb = getFirebase();
+  if(!fb){
+    alert("Falta configurar Firebase (window.__FIREBASE_CONFIG).");
+    return;
+  }
+  const email = safeText(cloudEmail?.value || "");
+  const pass = safeText(cloudPass?.value || "");
+  if(!email || !pass){
+    alert("Introduce email y password.");
+    return;
+  }
+  setCloudStatus("warn","☁️ Creando…");
+  try{
+    await fb.auth.createUserWithEmailAndPassword(email, pass);
+    localStorage.setItem(K.CLOUD_EMAIL_LAST, email);
+    if(cloudPass) cloudPass.value = "";
+  }catch(e){
+    const code = e?.code || "sin-codigo";
+    const msg = e?.message || "desconocido";
+    setCloudStatus("bad", `☁️ Error registro: ${code}`);
+    console.error("Firebase register error:", e);
+    alert(`Error registro:\n${code}\n${msg}`);
+  }
+}
+
+async function cloudLogout(){
+  const fb = getFirebase();
+  if(!fb){
+    alert("Firebase no configurado.");
+    return;
+  }
+  setCloudStatus("warn","☁️ Saliendo…");
+  try{
+    await fb.auth.signOut();
+  }catch(e){
+    console.error("Logout error:", e);
+    alert("Error logout: " + (e?.message || "desconocido"));
+  }
 }
 
 /* ---------------------------
@@ -404,7 +449,6 @@ function pushCloud(){
 const btnTheme = $("#btnTheme");
 
 function getTheme(){
-  // Por defecto: DÍA (light)
   return localStorage.getItem(K.THEME) || "light";
 }
 
@@ -413,8 +457,6 @@ function applyTheme(theme){
   document.body.classList.toggle("light", isLight);
   if(btnTheme) btnTheme.textContent = isLight ? "☀️" : "🌙";
   localStorage.setItem(K.THEME, theme);
-
-  // refrescar charts para que se vean bien sobre el fondo
   setTimeout(()=>updateCharts(), 50);
 }
 
@@ -424,7 +466,7 @@ function toggleTheme(){
 }
 
 /* ---------------------------
-   SESSION / PIN GATE (usuarios)
+   SESSION / PIN GATE (usuarios internos)
 --------------------------- */
 const pinGate = $("#pinGate");
 const app = $("#app");
@@ -447,20 +489,21 @@ function lock(){
   setSessionOk(false);
   app.classList.add("hidden");
   pinGate.classList.remove("hidden");
-  pinInput.value = "";
-  pinMsg.textContent = "";
+  if(pinInput) pinInput.value = "";
+  if(pinMsg) pinMsg.textContent = "";
   renderUserSelect();
-  userSelect.focus();
+  userSelect?.focus();
 }
 
 function unlock(){
   setSessionOk(true);
   pinGate.classList.add("hidden");
   app.classList.remove("hidden");
-  pinMsg.textContent = "";
+  if(pinMsg) pinMsg.textContent = "";
 }
 
 function renderUserSelect(){
+  if(!userSelect) return;
   userSelect.innerHTML = "";
   const list = USERS.slice().sort((a,b)=>a.name.localeCompare(b.name));
   for(const u of list){
@@ -476,15 +519,15 @@ function renderUserSelect(){
 }
 
 async function checkPin(){
-  const uId = userSelect.value;
+  const uId = userSelect?.value || "";
   const u = USERS.find(x=>x.id===uId);
   if(!u){
-    pinMsg.textContent = "Usuario inválido";
+    if(pinMsg) pinMsg.textContent = "Usuario inválido";
     return;
   }
-  const entered = safeText(pinInput.value);
+  const entered = safeText(pinInput?.value || "");
   if(!entered){
-    pinMsg.textContent = "Introduce el PIN";
+    if(pinMsg) pinMsg.textContent = "Introduce el PIN";
     return;
   }
 
@@ -496,18 +539,23 @@ async function checkPin(){
     setSessionUser(u.id);
     unlock();
 
-    // cargar DB del usuario
     DB = loadLocalDB(ACTIVE_USER_ID);
 
-    // enganchar nube para este usuario
-    if(CLOUD_READY){
-      const fb = getFirebase();
-      if(fb) attachCloudForActiveUser(fb.db);
+    const fb = getFirebase();
+    if(fb && fb.auth.currentUser){
+      CLOUD_UID = fb.auth.currentUser.uid;
+      CLOUD_READY = true;
+      setCloudStatus("ok","☁️ Nube online");
+      if(cloudUidLabel) cloudUidLabel.textContent = CLOUD_UID;
+      attachCloudForActiveUser(fb.db);
+      pushCloud();
+    }else{
+      if(FIREBASE_READY) setCloudStatus("warn","☁️ Nube: sin sesión");
     }
 
     renderAll();
   }else{
-    pinMsg.textContent = "PIN incorrecto";
+    if(pinMsg) pinMsg.textContent = "PIN incorrecto";
   }
 }
 
@@ -527,9 +575,8 @@ function showTab(key){
   const btn = $(`.navItem[data-tab="${key}"]`);
   if(btn) btn.classList.add("active");
   Object.keys(tabs).forEach(k=>{
-    tabs[k].classList.toggle("hidden", k!==key);
+    tabs[k]?.classList.toggle("hidden", k!==key);
   });
-
   if(key==="reports"){
     setTimeout(()=>updateCharts(), 50);
   }
@@ -545,15 +592,19 @@ const modalFooter = $("#modalFooter");
 const modalClose = $("#modalClose");
 
 function openModal(title, bodyNode, footerNode){
-  modalTitle.textContent = title;
-  modalBody.innerHTML = "";
-  modalBody.appendChild(bodyNode);
-  modalFooter.innerHTML = "";
-  if(footerNode) modalFooter.appendChild(footerNode);
-  modal.classList.remove("hidden");
+  if(modalTitle) modalTitle.textContent = title;
+  if(modalBody){
+    modalBody.innerHTML = "";
+    modalBody.appendChild(bodyNode);
+  }
+  if(modalFooter){
+    modalFooter.innerHTML = "";
+    if(footerNode) modalFooter.appendChild(footerNode);
+  }
+  modal?.classList.remove("hidden");
 }
 
-function closeModal(){ modal.classList.add("hidden"); }
+function closeModal(){ modal?.classList.add("hidden"); }
 
 modalClose?.addEventListener("click", closeModal);
 modal?.addEventListener("click", (e)=>{ if(e.target === modal) closeModal(); });
@@ -729,13 +780,14 @@ function renderKPIs(){
   const pendingCount = DB.invoices.filter(i=>i.status==="Pendiente").length;
   const paidCount = DB.invoices.filter(i=>i.status==="Pagada").length;
 
-  kpiPendingGlobal.textContent = money(sums.Pendiente);
-  kpiPendingCount.textContent = String(pendingCount);
-  kpiPaidGlobal.textContent = money(sums.Pagada);
-  kpiPaidCount.textContent = String(paidCount);
+  if(kpiPendingGlobal) kpiPendingGlobal.textContent = money(sums.Pendiente);
+  if(kpiPendingCount) kpiPendingCount.textContent = String(pendingCount);
+  if(kpiPaidGlobal) kpiPaidGlobal.textContent = money(sums.Pagada);
+  if(kpiPaidCount) kpiPaidCount.textContent = String(paidCount);
 }
 
 function renderPendingByClient(){
+  if(!pendingByClientList) return;
   const rows = pendingByClient(dashSearchClient?.value || "");
   pendingByClientList.innerHTML = "";
   if(rows.length===0){
@@ -760,17 +812,18 @@ function renderPendingByClient(){
 }
 
 function renderDashSummary(){
-  const sel = dashPeriod.value;
+  if(!dashSummary) return;
+  const sel = dashPeriod?.value || "thisWeek";
   let fromISO="", toISO="";
   if(sel==="custom"){
-    fromISO = dashFrom.value || "";
-    toISO = dashTo.value || "";
+    fromISO = dashFrom?.value || "";
+    toISO = dashTo?.value || "";
   }else{
     const p = resolvePeriod(sel);
     fromISO = p.fromISO;
     toISO = p.toISO;
-    dashFrom.value = fromISO;
-    dashTo.value = toISO;
+    if(dashFrom) dashFrom.value = fromISO;
+    if(dashTo) dashTo.value = toISO;
   }
   const invs = getInvoicesFiltered({ q:"", clientId:"all", status:"all", fromISO, toISO });
   const sums = sumByStatus(invs);
@@ -805,12 +858,14 @@ const invCountInfo = $("#invCountInfo");
 const invTotalInfo = $("#invTotalInfo");
 
 function renderInvoices(){
+  if(!invTbody) return;
+
   const list = getInvoicesFiltered({
-    q: invSearch.value,
-    clientId: invClientFilter.value,
-    status: invStatusFilter.value,
-    fromISO: invFrom.value,
-    toISO: invTo.value,
+    q: invSearch?.value || "",
+    clientId: invClientFilter?.value || "all",
+    status: invStatusFilter?.value || "all",
+    fromISO: invFrom?.value || "",
+    toISO: invTo?.value || "",
   });
 
   invTbody.innerHTML = "";
@@ -841,8 +896,8 @@ function renderInvoices(){
     invTbody.appendChild(tr);
   }
 
-  invCountInfo.textContent = `${list.length} factura(s)`;
-  invTotalInfo.textContent = `Total listado: ${money(total)}`;
+  if(invCountInfo) invCountInfo.textContent = `${list.length} factura(s)`;
+  if(invTotalInfo) invTotalInfo.textContent = `Total listado: ${money(total)}`;
 
   invTbody.querySelectorAll("button[data-act]").forEach(btn=>{
     btn.addEventListener("click", ()=>{
@@ -1186,16 +1241,16 @@ const clientDetail = $("#clientDetail");
 let selectedClientId = null;
 
 function renderClients(){
-  const q = safeText(clientSearch.value).toLowerCase();
+  const q = safeText(clientSearch?.value || "").toLowerCase();
   const list = DB.clients
     .filter(c=> !q || c.name.toLowerCase().includes(q))
     .slice()
     .sort((a,b)=>a.name.localeCompare(b.name));
 
-  clientList.innerHTML = "";
+  if(clientList) clientList.innerHTML = "";
   if(list.length===0){
-    clientList.innerHTML = `<div class="muted">Sin clientes.</div>`;
-    clientDetail.textContent = "Selecciona un cliente…";
+    if(clientList) clientList.innerHTML = `<div class="muted">Sin clientes.</div>`;
+    if(clientDetail) clientDetail.textContent = "Selecciona un cliente…";
     return;
   }
 
@@ -1217,7 +1272,7 @@ function renderClients(){
       selectedClientId = c.id;
       renderClientDetail();
     });
-    clientList.appendChild(el);
+    clientList?.appendChild(el);
   }
 
   if(!selectedClientId && list[0]) selectedClientId = list[0].id;
@@ -1227,7 +1282,7 @@ function renderClients(){
 function renderClientDetail(){
   const c = getClientById(selectedClientId);
   if(!c){
-    clientDetail.textContent = "Selecciona un cliente…";
+    if(clientDetail) clientDetail.textContent = "Selecciona un cliente…";
     return;
   }
 
@@ -1285,8 +1340,10 @@ function renderClientDetail(){
   tip.textContent = "Gráficos avanzados están en Reportes → selecciona este cliente y el periodo.";
 
   wrap.append(top, actions, tip);
-  clientDetail.innerHTML = "";
-  clientDetail.appendChild(wrap);
+  if(clientDetail){
+    clientDetail.innerHTML = "";
+    clientDetail.appendChild(wrap);
+  }
 }
 
 function openClientModal(editId=null){
@@ -1398,13 +1455,13 @@ const btnPDFPaidGlobal = $("#btnPDFPaidGlobal");
 const btnPDFPaidClient = $("#btnPDFPaidClient");
 
 function runReports(){
-  repOut.innerHTML = "";
+  if(repOut) repOut.innerHTML = "";
 
-  const mode = repMode.value;
-  const clientId = repClient.value || "all";
+  const mode = repMode?.value || "weekly";
+  const clientId = repClient?.value || "all";
 
-  let fromISO = repFrom.value || "";
-  let toISO = repTo.value || "";
+  let fromISO = repFrom?.value || "";
+  let toISO = repTo?.value || "";
   ({fromISO, toISO} = clampDateRange(fromISO, toISO));
 
   const now = new Date();
@@ -1416,14 +1473,14 @@ function runReports(){
       fromISO = toISODate(startOfMonth(now));
       toISO = toISODate(endOfMonth(now));
     }
-    repFrom.value = fromISO;
-    repTo.value = toISO;
+    if(repFrom) repFrom.value = fromISO;
+    if(repTo) repTo.value = toISO;
   }
 
   const invs = getInvoicesFiltered({ q:"", clientId, status:"all", fromISO, toISO });
   if(invs.length===0){
-    repOut.innerHTML = `<div class="muted">No hay facturas en ese periodo.</div>`;
-    updateCharts(); // limpia
+    if(repOut) repOut.innerHTML = `<div class="muted">No hay facturas en ese periodo.</div>`;
+    updateCharts();
     return;
   }
 
@@ -1442,7 +1499,7 @@ function runReports(){
       <span class="badge">Total: ${money(sums.all)}</span>
     </div>
   `;
-  repOut.appendChild(box);
+  repOut?.appendChild(box);
 
   updateCharts();
 }
@@ -1478,11 +1535,6 @@ function showPDFError(title, err){
         <div class="sub">${escapeHtml(String(err?.message || err || "Error desconocido"))}</div>
       </div>
       <div class="badge bad">PDF</div>
-    </div>
-    <div class="muted" style="margin-top:12px;">
-      Revisa que existan estos scripts en index.html:<br/>
-      - jspdf.umd.min.js<br/>
-      - jspdf.plugin.autotable.min.js
     </div>
   `;
 
@@ -1667,9 +1719,7 @@ function ensureCharts(){
         responsive: true,
         maintainAspectRatio: false,
         plugins: { legend: { display: true } },
-        scales: {
-          y: { ticks: { callback: (v)=>Number(v).toLocaleString("es-ES") } }
-        }
+        scales: { y: { ticks: { callback: (v)=>Number(v).toLocaleString("es-ES") } } }
       }
     });
   }
@@ -1688,9 +1738,7 @@ function ensureCharts(){
         responsive: true,
         maintainAspectRatio: false,
         plugins: { legend: { display: true } },
-        scales: {
-          y: { ticks: { callback: (v)=>Number(v).toLocaleString("es-ES") } }
-        }
+        scales: { y: { ticks: { callback: (v)=>Number(v).toLocaleString("es-ES") } } }
       }
     });
   }
@@ -1730,7 +1778,6 @@ function buildTrendBuckets(invs, mode){
     }
   }
 
-  // union keys ordenados por fecha
   const keys = new Set([...mapPend.keys(), ...mapPaid.keys()]);
   const arr = Array.from(keys);
 
@@ -1739,7 +1786,6 @@ function buildTrendBuckets(invs, mode){
       const [y,m] = k.replace("W ","").split("-").map(Number);
       return new Date(y, (m||1)-1, 1).getTime();
     }
-    // W YYYY-MM-DD
     const iso = k.replace("W ","");
     return parseISODate(iso)?.getTime() || 0;
   };
@@ -1772,21 +1818,13 @@ function updateCharts(){
   const clientId = repClient?.value || "all";
   const mode = repMode?.value || "weekly";
 
-  const invs = getInvoicesFiltered({
-    q:"",
-    clientId,
-    status:"all",
-    fromISO,
-    toISO
-  });
+  const invs = getInvoicesFiltered({ q:"", clientId, status:"all", fromISO, toISO });
 
-  // 1) Bar: importe por tag (total, incluye pend+pag)
   const byTag = buildByTag(invs);
   chartByTag.data.labels = byTag.labels;
   chartByTag.data.datasets[0].data = byTag.data;
   chartByTag.update();
 
-  // 2) Line: tendencia por semana/mes separando pend vs pag
   const tr = buildTrendBuckets(invs, mode==="monthly" ? "monthly" : "weekly");
   chartTrend.data.labels = tr.labels;
   chartTrend.data.datasets[0].data = tr.pend;
@@ -1801,6 +1839,7 @@ const btnNewUser = $("#btnNewUser");
 const usersList = $("#usersList");
 
 function renderUsersTab(){
+  if(!usersList) return;
   usersList.innerHTML = "";
   const list = USERS.slice().sort((a,b)=>a.name.localeCompare(b.name));
 
@@ -1828,6 +1867,9 @@ function renderUsersTab(){
       if(act==="del") openDeleteUserModal(id);
     });
   });
+
+  const lastEmail = localStorage.getItem(K.CLOUD_EMAIL_LAST) || "";
+  if(cloudEmail && !cloudEmail.value && lastEmail) cloudEmail.value = lastEmail;
 }
 
 function openNewUserModal(){
@@ -1891,11 +1933,7 @@ function openChangePinModal(userId){
   pin.wrap.classList.add("full");
   pin.input.inputMode = "numeric";
 
-  const note = document.createElement("div");
-  note.className = "muted full";
-  note.textContent = "Este PIN solo afecta a este usuario. Sus datos se mantienen.";
-
-  body.append(pin.wrap, note);
+  body.append(pin.wrap);
 
   const foot = document.createElement("div");
   foot.className="row";
@@ -1936,7 +1974,7 @@ function openDeleteUserModal(userId){
   body.innerHTML = `
     <div class="muted">¿Borrar usuario <b>${escapeHtml(u.name)}</b>?</div>
     <div class="muted" style="margin-top:8px">
-      Esto elimina el usuario del login. Los datos locales del usuario se pueden borrar manualmente con Reset local (si estás dentro de ese usuario).
+      Esto elimina el usuario del login interno (PIN). Sus datos locales quedan en el navegador, y la nube (si existe) queda en Firebase.
     </div>
   `;
 
@@ -1987,7 +2025,7 @@ async function doImport(file){
 
 function resetLocal(){
   const body = document.createElement("div");
-  body.innerHTML = `<div class="muted">Esto borra el almacenamiento local <b>del usuario activo</b> y restaura datos iniciales. La nube (si está activa) puede volver a sincronizar datos luego.</div>`;
+  body.innerHTML = `<div class="muted">Esto borra el almacenamiento local <b>del usuario activo</b> y restaura datos iniciales. Si la nube está conectada, se volverá a sincronizar después.</div>`;
 
   const foot = document.createElement("div");
   foot.className="row";
@@ -2006,6 +2044,7 @@ function resetLocal(){
     DB = loadLocalDB(ACTIVE_USER_ID);
     closeModal();
     renderAll();
+    pushCloud();
   };
 
   foot.append(cancel, ok);
@@ -2016,7 +2055,6 @@ function resetLocal(){
    MAIN RENDER
 --------------------------- */
 function renderAll(){
-  // usuario labels
   if(activeUserLabel) activeUserLabel.textContent = ACTIVE_USER_NAME || "";
   if(activeUserLabel2) activeUserLabel2.textContent = ACTIVE_USER_NAME || "";
 
@@ -2028,16 +2066,17 @@ function renderAll(){
   renderClients();
   renderUsersTab();
   updateCharts();
+
+  pushCloud();
 }
 
 /* ---------------------------
    EVENTS
 --------------------------- */
 function bindEvents(){
-  // theme
   btnTheme?.addEventListener("click", toggleTheme);
 
-  // PIN / Session
+  // PIN
   pinBtn?.addEventListener("click", checkPin);
   pinInput?.addEventListener("keydown",(e)=>{ if(e.key==="Enter") checkPin(); });
   btnLock?.addEventListener("click", lock);
@@ -2047,20 +2086,30 @@ function bindEvents(){
     btn.addEventListener("click", ()=>showTab(btn.dataset.tab));
   });
 
+  // Open Cloud Account (direct)
+  $("#btnOpenCloudAccount")?.addEventListener("click", ()=>{
+    showTab("users");
+    setTimeout(()=>cloudEmail?.focus(), 60);
+  });
+  $("#btnCloudQuick")?.addEventListener("click", ()=>{
+    showTab("users");
+    setTimeout(()=>cloudEmail?.focus(), 60);
+  });
+
   // Dashboard
   dashSearchClient?.addEventListener("input", renderPendingByClient);
   dashApply?.addEventListener("click", renderDashSummary);
   dashPeriod?.addEventListener("change", ()=>{
     const isCustom = dashPeriod.value==="custom";
-    dashFrom.disabled = !isCustom;
-    dashTo.disabled = !isCustom;
+    if(dashFrom) dashFrom.disabled = !isCustom;
+    if(dashTo) dashTo.disabled = !isCustom;
     renderDashSummary();
   });
 
   btnPDFPendingGlobalDash?.addEventListener("click", ()=>generateStatusPDF("Pendiente", "global"));
   btnPDFPaidGlobalDash?.addEventListener("click", ()=>generateStatusPDF("Pagada", "global"));
 
-  // Invoices
+  // Invoices filters
   const rerInv = ()=>renderInvoices();
   invSearch?.addEventListener("input", rerInv);
   invClientFilter?.addEventListener("change", rerInv);
@@ -2069,11 +2118,11 @@ function bindEvents(){
   invTo?.addEventListener("change", rerInv);
 
   invClearFilters?.addEventListener("click", ()=>{
-    invSearch.value = "";
-    invClientFilter.value = "all";
-    invStatusFilter.value = "all";
-    invFrom.value = "";
-    invTo.value = "";
+    if(invSearch) invSearch.value = "";
+    if(invClientFilter) invClientFilter.value = "all";
+    if(invStatusFilter) invStatusFilter.value = "all";
+    if(invFrom) invFrom.value = "";
+    if(invTo) invTo.value = "";
     renderInvoices();
   });
 
@@ -2088,36 +2137,28 @@ function bindEvents(){
   repMode?.addEventListener("change", ()=>{
     const now = new Date();
     if(repMode.value==="weekly"){
-      repFrom.value = toISODate(startOfWeek(now));
-      repTo.value = toISODate(endOfWeek(now));
+      if(repFrom) repFrom.value = toISODate(startOfWeek(now));
+      if(repTo) repTo.value = toISODate(endOfWeek(now));
     }else if(repMode.value==="monthly"){
-      repFrom.value = toISODate(startOfMonth(now));
-      repTo.value = toISODate(endOfMonth(now));
+      if(repFrom) repFrom.value = toISODate(startOfMonth(now));
+      if(repTo) repTo.value = toISODate(endOfMonth(now));
     }
     updateCharts();
   });
-
   repFrom?.addEventListener("change", updateCharts);
   repTo?.addEventListener("change", updateCharts);
   repClient?.addEventListener("change", updateCharts);
 
   btnPDFPendingGlobal?.addEventListener("click", ()=>generateStatusPDF("Pendiente", "global"));
   btnPDFPendingClient?.addEventListener("click", ()=>{
-    const id = repClient.value;
-    if(!id || id==="all"){
-      alert("Selecciona un cliente para PDF Pendientes Cliente.");
-      return;
-    }
+    const id = repClient?.value || "all";
+    if(!id || id==="all"){ alert("Selecciona un cliente."); return; }
     generateStatusPDF("Pendiente", "client", id);
   });
-
   btnPDFPaidGlobal?.addEventListener("click", ()=>generateStatusPDF("Pagada", "global"));
   btnPDFPaidClient?.addEventListener("click", ()=>{
-    const id = repClient.value;
-    if(!id || id==="all"){
-      alert("Selecciona un cliente para PDF Pagadas Cliente.");
-      return;
-    }
+    const id = repClient?.value || "all";
+    if(!id || id==="all"){ alert("Selecciona un cliente."); return; }
     generateStatusPDF("Pagada", "client", id);
   });
 
@@ -2144,6 +2185,11 @@ function bindEvents(){
   });
 
   btnClearLocal?.addEventListener("click", resetLocal);
+
+  // Cloud buttons
+  btnCloudLogin?.addEventListener("click", cloudLogin);
+  btnCloudRegister?.addEventListener("click", cloudRegister);
+  btnCloudLogout?.addEventListener("click", cloudLogout);
 }
 
 /* ---------------------------
@@ -2151,13 +2197,23 @@ function bindEvents(){
 --------------------------- */
 (async function init(){
   applyTheme(getTheme());
-
   await ensureUsers();
   renderUserSelect();
-
   bindEvents();
 
-  // intentar restaurar sesión
+  const now = new Date();
+  if(repFrom) repFrom.value = toISODate(startOfWeek(now));
+  if(repTo) repTo.value = toISODate(endOfWeek(now));
+
+  if(dashFrom && dashTo){
+    dashFrom.value = toISODate(startOfWeek(now));
+    dashTo.value = toISODate(endOfWeek(now));
+    dashFrom.disabled = true;
+    dashTo.disabled = true;
+  }
+
+  initCloud();
+
   const rememberedUser = getSessionUser();
   const hasUser = USERS.some(u=>u.id===rememberedUser);
 
@@ -2167,46 +2223,21 @@ function bindEvents(){
     DB = loadLocalDB(ACTIVE_USER_ID);
     unlock();
     renderAll();
+
+    const fb = getFirebase();
+    if(fb && fb.auth.currentUser){
+      CLOUD_UID = fb.auth.currentUser.uid;
+      CLOUD_READY = true;
+      setCloudStatus("ok","☁️ Nube online");
+      if(cloudUidLabel) cloudUidLabel.textContent = CLOUD_UID;
+      attachCloudForActiveUser(fb.db);
+      pushCloud();
+    }
   }else{
     lock();
   }
 
-  // fechas por defecto reportes
-  const now = new Date();
-  const repFromEl = $("#repFrom");
-  const repToEl = $("#repTo");
-  if(repFromEl) repFromEl.value = toISODate(startOfWeek(now));
-  if(repToEl) repToEl.value = toISODate(endOfWeek(now));
-
-  // dashboard range
-  const dashFromEl = $("#dashFrom");
-  const dashToEl = $("#dashTo");
-  if(dashFromEl && dashToEl){
-    dashFromEl.value = toISODate(startOfWeek(now));
-    dashToEl.value = toISODate(endOfWeek(now));
-    dashFromEl.disabled = true;
-    dashToEl.disabled = true;
-  }
-   function openCloudAccount(){
-  document.getElementById("cloudAccountModal").style.display="block";
-}
-
-function closeCloudAccount(){
-  document.getElementById("cloudAccountModal").style.display="none";
-}
-
-function cloudLoginUI(){
-  const email = document.getElementById("cloudEmail").value.trim();
-  const pass  = document.getElementById("cloudPass").value.trim();
-  cloudLogin(email, pass);
-}
-
-function cloudRegisterUI(){
-  const email = document.getElementById("cloudEmail").value.trim();
-  const pass  = document.getElementById("cloudPass").value.trim();
-  cloudRegister(email, pass);
-}
-
-
-  initCloud();
+  // Prefill last email
+  const lastEmail = localStorage.getItem(K.CLOUD_EMAIL_LAST) || "";
+  if(cloudEmail && !cloudEmail.value && lastEmail) cloudEmail.value = lastEmail;
 })();
