@@ -4,9 +4,11 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>ARSLAN • Facturas & Contabilidad</title>
+
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600;700&display=swap" rel="stylesheet">
+
   <link rel="stylesheet" href="./style.css" />
 </head>
 
@@ -17,12 +19,12 @@
       <div class="logo">A</div>
       <div class="brandText">
         <div class="title">ARSLAN • Facturas</div>
-        <div class="subtitle">Control por cliente · estados · semanas · meses · nube</div>
+        <div class="subtitle">Clientes · Tags · Estados · Semanas/Meses · PDF · Nube</div>
       </div>
     </div>
 
     <div class="topbarRight">
-      <button id="btnTheme" class="btn ghost" title="Modo Día/Noche">☀️</button>
+      <button id="btnTheme" class="btn ghost" title="Modo Día / Noche">☀️</button>
       <div id="cloudStatus" class="cloud-pill warn">☁️ Conectando…</div>
       <button id="btnLock" class="btn ghost" title="Bloquear">🔒</button>
     </div>
@@ -45,6 +47,7 @@
   <!-- APP -->
   <main id="app" class="app hidden">
     <div class="layout">
+
       <!-- LEFT: NAV -->
       <aside class="sidebar">
         <button class="navItem active" data-tab="dashboard">📊 Dashboard</button>
@@ -71,6 +74,7 @@
                 <h3>Pendientes (global)</h3>
                 <span class="pill">Siempre visible</span>
               </div>
+
               <div class="kpis">
                 <div class="kpi">
                   <div class="kLabel">Pendiente €</div>
@@ -85,10 +89,11 @@
                   <div id="kpiGiradaGlobal" class="kValue">0,00 €</div>
                 </div>
                 <div class="kpi">
-                  <div class="kLabel">Cobradas €</div>
+                  <div class="kLabel">Pagadas €</div>
                   <div id="kpiPaidGlobal" class="kValue">0,00 €</div>
                 </div>
               </div>
+
               <div class="row wrap" style="margin-top:12px;">
                 <button id="btnPDFPendingGlobalDash" class="btn">📄 PDF Pendientes Global</button>
               </div>
@@ -107,8 +112,8 @@
 
           <div class="card">
             <div class="cardHeader">
-              <h3>Resumen rápido por periodo</h3>
-              <div class="row">
+              <h3>Resumen por periodo</h3>
+              <div class="row wrap">
                 <select id="dashPeriod" class="input">
                   <option value="thisWeek">Esta semana</option>
                   <option value="lastWeek">Semana pasada</option>
@@ -139,7 +144,7 @@
                   <option value="all">Todos estados</option>
                   <option value="Pendiente">Pendiente</option>
                   <option value="Girada">Girada</option>
-                  <option value="Cobrada">Cobrada</option>
+                  <option value="Cobrada">Pagada</option>
                 </select>
                 <input id="invFrom" type="date" class="input" />
                 <input id="invTo" type="date" class="input" />
@@ -239,7 +244,7 @@
     </div>
   </div>
 
-  <!-- FIREBASE (Cloud Sync) -->
+  <!-- FIREBASE CONFIG (rellena tu config real) -->
   <script>
     // window.__FIREBASE_CONFIG = {
     //   apiKey: "XXXX",
@@ -250,14 +255,16 @@
     // };
   </script>
 
+  <!-- Firebase compat -->
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
 
-  <!-- PDF: jsPDF + AutoTable -->
+  <!-- PDF libs (IMPORTANTE el orden) -->
   <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js"></script>
 
   <script src="./app.js"></script>
 </body>
 </html>
+
