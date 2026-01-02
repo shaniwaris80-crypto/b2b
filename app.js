@@ -2187,6 +2187,26 @@ function bindEvents(){
     dashFromEl.disabled = true;
     dashToEl.disabled = true;
   }
+   function openCloudAccount(){
+  document.getElementById("cloudAccountModal").style.display="block";
+}
+
+function closeCloudAccount(){
+  document.getElementById("cloudAccountModal").style.display="none";
+}
+
+function cloudLoginUI(){
+  const email = document.getElementById("cloudEmail").value.trim();
+  const pass  = document.getElementById("cloudPass").value.trim();
+  cloudLogin(email, pass);
+}
+
+function cloudRegisterUI(){
+  const email = document.getElementById("cloudEmail").value.trim();
+  const pass  = document.getElementById("cloudPass").value.trim();
+  cloudRegister(email, pass);
+}
+
 
   initCloud();
 })();
