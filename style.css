@@ -292,6 +292,20 @@ body.light{
   margin-top:12px;
 }
 
+/* CHARTS */
+.chartWrap{
+  width:100%;
+  height:320px;
+  border-radius:14px;
+  border:1px solid color-mix(in srgb, var(--text) 8%, transparent);
+  background: color-mix(in srgb, var(--text) 2%, transparent);
+  padding:10px;
+}
+.chartWrap canvas{
+  width:100% !important;
+  height:100% !important;
+}
+
 /* GATE */
 .gate{
   position:fixed; inset:0;
@@ -323,6 +337,10 @@ body.light .gate{ background: rgba(255,255,255,.60); }
   outline:none;
   font-size:16px;
 }
+.gateSelect{
+  width:100%;
+  min-width: unset;
+}
 .msg{ margin-top:10px; color: var(--bad); font-weight:600; min-height:22px; }
 .hint{ margin-top:10px; }
 
@@ -338,7 +356,7 @@ body.light .gate{ background: rgba(255,255,255,.60); }
 body.light .modal{ background: rgba(255,255,255,.60); }
 
 .modalCard{
-  width:min(720px, 95vw);
+  width:min(760px, 95vw);
   background: color-mix(in srgb, var(--panel) 92%, transparent);
   border:1px solid var(--line);
   border-radius: 22px;
