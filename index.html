@@ -1,3 +1,8 @@
+<!-- =========================
+     index.html (COMPLETO)
+     ✅ SOLO MEJORAS DE ASPECTO + MÓVIL (MENÚ HAMBURGUESA B)
+     ❌ SIN TOCAR LÓGICA / SIN ACORTAR FUNCIONES
+========================= -->
 <!doctype html>
 <html lang="es">
 <head>
@@ -24,6 +29,9 @@
     </div>
 
     <div class="topbarRight">
+      <!-- ✅ NUEVO: Botón hamburguesa (solo móvil) -->
+      <label for="navToggle" class="btn ghost mobOnly" title="Menú">☰</label>
+
       <button id="btnTheme" class="btn ghost" title="Modo Día/Noche">☀️</button>
 
       <div id="cloudStatus" class="cloud-pill warn" title="Estado de conexión cloud">☁️ Nube: comprobando…</div>
@@ -58,6 +66,10 @@
 
   <!-- APP -->
   <main id="app" class="app hidden">
+    <!-- ✅ NUEVO: Toggle + overlay (CSS puro, sin JS) -->
+    <input type="checkbox" id="navToggle" class="navToggle" />
+    <label for="navToggle" class="navOverlay"></label>
+
     <div class="layout">
 
       <!-- LEFT: NAV -->
@@ -354,18 +366,8 @@
     </div>
   </div>
 
-  <!-- FIREBASE CONFIG (PEGA AQUÍ TU CONFIG REAL) -->
+  <!-- FIREBASE CONFIG -->
   <script>
-    // ✅ PEGA TU CONFIG AQUÍ (sin comentarios) para que la nube guarde TODO
-    // window.__FIREBASE_CONFIG = {
-    //   apiKey: "TU_API_KEY",
-    //   authDomain: "TU_PROYECTO.firebaseapp.com",
-    //   databaseURL: "https://TU_PROYECTO-default-rtdb.europe-west1.firebasedatabase.app",
-    //   projectId: "TU_PROYECTO",
-    //   appId: "TU_APP_ID"
-    // };
-
-    // ✅ EJEMPLO (tú ya me diste tu config; pégala aquí):
     window.__FIREBASE_CONFIG = {
       apiKey: "AIzaSyB-9t7QSN-7iDWphqL74SNnpGNmFnIP4E4",
       authDomain: "b2baw-b6b8a.firebaseapp.com",
