@@ -13,6 +13,17 @@
   --radius:16px;
 }
 
+/* 🌞 MODO DÍA */
+body.light{
+  --bg:#f5f7fb;
+  --panel:#ffffff;
+  --panel2:#ffffff;
+  --text:#0b1220;
+  --muted:#51627a;
+  --line:#dbe3ef;
+  --shadow: 0 10px 30px rgba(15, 28, 52, .10);
+}
+
 *{ box-sizing:border-box; }
 html,body{ height:100%; }
 body{
@@ -21,9 +32,13 @@ body{
   background: radial-gradient(1200px 700px at 20% 0%, #132033 0%, var(--bg) 55%);
   color:var(--text);
 }
+body.light{
+  background: radial-gradient(1200px 700px at 20% 0%, #ffffff 0%, var(--bg) 55%);
+}
 
 .hidden{ display:none !important; }
 
+/* resto igual, solo cambié backgrounds a variables */
 .topbar{
   position:sticky;
   top:0;
@@ -33,7 +48,7 @@ body{
   justify-content:space-between;
   padding:12px 14px;
   border-bottom:1px solid var(--line);
-  background: rgba(11,15,20,.75);
+  background: color-mix(in srgb, var(--panel) 70%, transparent);
   backdrop-filter: blur(10px);
 }
 
@@ -54,15 +69,15 @@ body{
   padding:6px 10px;
   border-radius:999px;
   border:1px solid var(--line);
-  background: rgba(15,22,32,.6);
+  background: color-mix(in srgb, var(--panel) 70%, transparent);
 }
-.cloud-pill.ok{ border-color: rgba(46,204,113,.35); }
-.cloud-pill.warn{ border-color: rgba(241,196,15,.35); }
-.cloud-pill.bad{ border-color: rgba(255,92,92,.35); }
+.cloud-pill.ok{ border-color: color-mix(in srgb, var(--good) 35%, var(--line)); }
+.cloud-pill.warn{ border-color: color-mix(in srgb, var(--warn) 35%, var(--line)); }
+.cloud-pill.bad{ border-color: color-mix(in srgb, var(--bad) 35%, var(--line)); }
 
 .btn{
-  border:1px solid rgba(255,255,255,.10);
-  background: rgba(86,211,100,.14);
+  border:1px solid color-mix(in srgb, var(--text) 10%, transparent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
   color:var(--text);
   padding:10px 12px;
   border-radius:12px;
@@ -73,23 +88,23 @@ body{
 .btn:hover{ transform: translateY(-1px); }
 .btn:active{ transform: translateY(0px); }
 .btn.ghost{
-  background: rgba(255,255,255,.04);
+  background: color-mix(in srgb, var(--text) 4%, transparent);
 }
 .btn.danger{
-  background: rgba(255,92,92,.12);
-  border-color: rgba(255,92,92,.25);
+  background: color-mix(in srgb, var(--bad) 12%, transparent);
+  border-color: color-mix(in srgb, var(--bad) 25%, transparent);
 }
 
 .input{
-  border:1px solid rgba(255,255,255,.10);
-  background: rgba(255,255,255,.04);
+  border:1px solid color-mix(in srgb, var(--text) 10%, transparent);
+  background: color-mix(in srgb, var(--text) 4%, transparent);
   color:var(--text);
   padding:10px 12px;
   border-radius:12px;
   outline:none;
   min-width:160px;
 }
-.input::placeholder{ color: rgba(159,176,199,.7); }
+.input::placeholder{ color: color-mix(in srgb, var(--muted) 85%, transparent); }
 
 .row{ display:flex; gap:10px; align-items:center; }
 .wrap{ flex-wrap:wrap; }
@@ -103,7 +118,7 @@ body{
   border:1px solid var(--line);
   padding:6px 10px;
   border-radius:999px;
-  background: rgba(255,255,255,.03);
+  background: color-mix(in srgb, var(--text) 3%, transparent);
 }
 
 .app{ padding:14px; }
@@ -114,7 +129,7 @@ body{
 }
 
 .sidebar{
-  background: rgba(15,22,32,.65);
+  background: color-mix(in srgb, var(--panel) 80%, transparent);
   border:1px solid var(--line);
   border-radius: var(--radius);
   padding:12px;
@@ -128,8 +143,8 @@ body{
   width:100%;
   display:block;
   text-align:left;
-  border:1px solid rgba(255,255,255,.08);
-  background: rgba(255,255,255,.03);
+  border:1px solid color-mix(in srgb, var(--text) 8%, transparent);
+  background: color-mix(in srgb, var(--text) 3%, transparent);
   color:var(--text);
   padding:12px 12px;
   border-radius:14px;
@@ -138,19 +153,19 @@ body{
   margin-bottom:10px;
 }
 .navItem.active{
-  border-color: rgba(86,211,100,.35);
-  background: rgba(86,211,100,.10);
+  border-color: color-mix(in srgb, var(--accent) 35%, transparent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
 }
 .navItem.danger{
-  border-color: rgba(255,92,92,.30);
-  background: rgba(255,92,92,.10);
+  border-color: color-mix(in srgb, var(--bad) 30%, transparent);
+  background: color-mix(in srgb, var(--bad) 10%, transparent);
 }
 .fileLabel{ position:relative; overflow:hidden; }
 
 .content{ display:flex; flex-direction:column; gap:14px; }
 
 .card{
-  background: rgba(15,22,32,.65);
+  background: color-mix(in srgb, var(--panel) 80%, transparent);
   border:1px solid var(--line);
   border-radius: var(--radius);
   padding:14px;
@@ -177,8 +192,8 @@ body{
   gap:10px;
 }
 .kpi{
-  border:1px solid rgba(255,255,255,.08);
-  background: rgba(255,255,255,.03);
+  border:1px solid color-mix(in srgb, var(--text) 8%, transparent);
+  background: color-mix(in srgb, var(--text) 3%, transparent);
   border-radius: 14px;
   padding:12px;
 }
@@ -192,8 +207,8 @@ body{
   margin-top:12px;
 }
 .item{
-  border:1px solid rgba(255,255,255,.08);
-  background: rgba(255,255,255,.03);
+  border:1px solid color-mix(in srgb, var(--text) 8%, transparent);
+  background: color-mix(in srgb, var(--text) 3%, transparent);
   border-radius: 14px;
   padding:12px;
   display:flex;
@@ -208,15 +223,15 @@ body{
   font-size:12px;
   padding:6px 10px;
   border-radius:999px;
-  border:1px solid rgba(255,255,255,.12);
-  background: rgba(255,255,255,.03);
+  border:1px solid color-mix(in srgb, var(--text) 12%, transparent);
+  background: color-mix(in srgb, var(--text) 3%, transparent);
   white-space:nowrap;
 }
-.badge.good{ border-color: rgba(46,204,113,.35); }
-.badge.warn{ border-color: rgba(241,196,15,.35); }
-.badge.bad{ border-color: rgba(255,92,92,.35); }
+.badge.good{ border-color: color-mix(in srgb, var(--good) 35%, var(--line)); }
+.badge.warn{ border-color: color-mix(in srgb, var(--warn) 35%, var(--line)); }
+.badge.bad{ border-color: color-mix(in srgb, var(--bad) 35%, var(--line)); }
 
-.tableWrap{ overflow:auto; border-radius:14px; border:1px solid rgba(255,255,255,.08); }
+.tableWrap{ overflow:auto; border-radius:14px; border:1px solid color-mix(in srgb, var(--text) 8%, transparent); }
 .table{
   width:100%;
   border-collapse:collapse;
@@ -224,19 +239,19 @@ body{
 }
 .table th, .table td{
   padding:10px 12px;
-  border-bottom:1px solid rgba(255,255,255,.06);
+  border-bottom:1px solid color-mix(in srgb, var(--text) 6%, transparent);
   font-size:13px;
 }
 .table th{
   position: sticky;
   top: 0;
-  background: rgba(12,18,26,.95);
+  background: color-mix(in srgb, var(--panel2) 92%, transparent);
   z-index: 1;
   text-align:left;
   font-size:12px;
   color: var(--muted);
 }
-.table tr:hover td{ background: rgba(255,255,255,.02); }
+.table tr:hover td{ background: color-mix(in srgb, var(--text) 2%, transparent); }
 
 .tableFooter{
   display:flex;
@@ -251,8 +266,8 @@ body{
   gap:10px;
 }
 .sumBox{
-  border:1px solid rgba(255,255,255,.08);
-  background: rgba(255,255,255,.03);
+  border:1px solid color-mix(in srgb, var(--text) 8%, transparent);
+  background: color-mix(in srgb, var(--text) 3%, transparent);
   border-radius:14px;
   padding:12px;
 }
@@ -274,9 +289,11 @@ body{
   backdrop-filter: blur(10px);
   z-index: 50;
 }
+body.light .gate{ background: rgba(255,255,255,.60); }
+
 .gateCard{
   width:min(520px, 92vw);
-  background: rgba(15,22,32,.85);
+  background: color-mix(in srgb, var(--panel) 88%, transparent);
   border:1px solid var(--line);
   border-radius: 22px;
   padding:18px;
@@ -286,8 +303,8 @@ body{
 .gateRow{ display:flex; gap:10px; margin-top:12px; }
 .gateRow input{
   flex:1;
-  border:1px solid rgba(255,255,255,.10);
-  background: rgba(255,255,255,.04);
+  border:1px solid color-mix(in srgb, var(--text) 10%, transparent);
+  background: color-mix(in srgb, var(--text) 4%, transparent);
   color:var(--text);
   padding:12px 14px;
   border-radius:14px;
@@ -304,9 +321,11 @@ body{
   padding:16px;
   z-index: 80;
 }
+body.light .modal{ background: rgba(255,255,255,.60); }
+
 .modalCard{
   width:min(720px, 95vw);
-  background: rgba(15,22,32,.92);
+  background: color-mix(in srgb, var(--panel) 92%, transparent);
   border:1px solid var(--line);
   border-radius: 22px;
   box-shadow: var(--shadow);
@@ -315,12 +334,12 @@ body{
 .modalHeader{
   display:flex; justify-content:space-between; align-items:center;
   padding:14px;
-  border-bottom:1px solid rgba(255,255,255,.08);
+  border-bottom:1px solid color-mix(in srgb, var(--text) 8%, transparent);
 }
 .modalHeader h3{ margin:0; }
 .modalFooter{
   padding:14px;
-  border-top:1px solid rgba(255,255,255,.08);
+  border-top:1px solid color-mix(in srgb, var(--text) 8%, transparent);
   display:flex;
   justify-content:flex-end;
   gap:10px;
