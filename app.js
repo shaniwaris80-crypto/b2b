@@ -261,43 +261,77 @@ function buildCloudRef(db){
   return db.ref("arslan_facturas_v24/" + CLOUD_UID + "/users/" + ACTIVE_USER_ID + "/data");
 }
 
+/* ===============================
+   FIREBASE INIT SAFE (UNA VEZ)
+=============================== */
+function getFirebase(){
+  if(!window.__FIREBASE_CONFIG) return null;
+  if(!firebase.apps || firebase.apps.length===0){
+    firebase.initializeApp(window.__FIREBASE_CONFIG);
+  }
+  return { auth: firebase.auth(), db: firebase.database() };
+}
+
+/* ===============================
+   INIT CLOUD (EMAIL/PASSWORD)
+=============================== */
 function initCloud(){
-  try{
-    if(!window.__FIREBASE_CONFIG){
-      setCloudStatus("bad","☁️ Nube: no configurada");
+  const fb = getFirebase();
+  if(!fb){
+    setCloudStatus("bad","☁️ Nube: no configurada");
+    return;
+  }
+
+  setCloudStatus("warn","☁️ Nube: esperando login…");
+
+  fb.auth.onAuthStateChanged(user=>{
+    if(!user){
+      CLOUD_READY = false;
+      CLOUD_UID = null;
+      setCloudStatus("warn","☁️ Nube: sin sesión");
       return;
     }
 
-    firebase.initializeApp(window.__FIREBASE_CONFIG);
-    const auth = firebase.auth();
-    const db = firebase.database();
+    CLOUD_UID = user.uid;
+    CLOUD_READY = true;
+    setCloudStatus("ok","☁️ Nube online");
 
-    setCloudStatus("warn","☁️ Conectando…");
+    if(ACTIVE_USER_ID){
+      attachCloudForActiveUser(fb.db);
+    }
+  });
+}
 
-    auth.signInAnonymously().then(()=>{
-      auth.onAuthStateChanged(user=>{
-        if(!user){
-          setCloudStatus("bad","☁️ Sin sesión");
-          return;
-        }
+/* ===============================
+   CLOUD LOGIN / REGISTER (EMAIL/PASS)
+=============================== */
+async function cloudLogin(email, pass){
+  const fb = getFirebase();
+  if(!fb){ alert("Falta configurar Firebase"); return; }
 
-        CLOUD_UID = user.uid;
-        CLOUD_READY = true;
-
-        setCloudStatus("ok","☁️ Nube online");
-
-        // si ya hay usuario activo, engancha la ref
-        if(ACTIVE_USER_ID){
-          attachCloudForActiveUser(db);
-        }
-
-      });
-    }).catch(()=>{
-      setCloudStatus("bad","☁️ Error login");
-    });
-
+  try{
+    await fb.auth.signInWithEmailAndPassword(email, pass);
   }catch(e){
-    setCloudStatus("bad","☁️ Error nube");
+    const code = e?.code || "sin-codigo";
+    const msg  = e?.message || "desconocido";
+    setCloudStatus("bad", `☁️ Error login: ${code}`);
+    console.error(e);
+    alert(`Error login:\n${code}\n${msg}`);
+  }
+}
+
+async function cloudRegister(email, pass){
+  const fb = getFirebase();
+  if(!fb){ alert("Falta configurar Firebase"); return; }
+
+  try{
+    await fb.auth.createUserWithEmailAndPassword(email, pass);
+  }catch(e){
+    const code = e?.code || "sin-codigo";
+    const msg  = e?.message || "desconocido";
+    setCloudStatus("bad", `☁️ Error registro: ${code}`);
+    console.error(e);
+    alert(`Error registro:\n${code}\n${msg}`);
   }
 }
 
@@ -348,7 +382,11 @@ function attachCloudForActiveUser(dbInstance){
         CLOUD_LOCK = false;
       }
     }
-  }).catch(()=>{});
+  }).catch((e)=>{
+    const code = e?.code || "sin-codigo";
+    setCloudStatus("bad", `☁️ Error sync: ${code}`);
+    console.error("Cloud get error", e);
+  });
 }
 
 function pushCloud(){
@@ -463,7 +501,8 @@ async function checkPin(){
 
     // enganchar nube para este usuario
     if(CLOUD_READY){
-      attachCloudForActiveUser(firebase.database());
+      const fb = getFirebase();
+      if(fb) attachCloudForActiveUser(fb.db);
     }
 
     renderAll();
