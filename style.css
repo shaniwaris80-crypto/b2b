@@ -337,10 +337,7 @@ body.light .gate{ background: rgba(255,255,255,.60); }
   outline:none;
   font-size:16px;
 }
-.gateSelect{
-  width:100%;
-  min-width: unset;
-}
+.gateSelect{ width:100%; min-width: unset; }
 .msg{ margin-top:10px; color: var(--bad); font-weight:600; min-height:22px; }
 .hint{ margin-top:10px; }
 
