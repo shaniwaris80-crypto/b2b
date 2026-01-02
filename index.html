@@ -22,6 +22,7 @@
     </div>
 
     <div class="topbarRight">
+      <button id="btnTheme" class="btn ghost" title="Modo Día/Noche">☀️</button>
       <div id="cloudStatus" class="cloud-pill warn">☁️ Conectando…</div>
       <button id="btnLock" class="btn ghost" title="Bloquear">🔒</button>
     </div>
@@ -87,6 +88,9 @@
                   <div class="kLabel">Cobradas €</div>
                   <div id="kpiPaidGlobal" class="kValue">0,00 €</div>
                 </div>
+              </div>
+              <div class="row wrap" style="margin-top:12px;">
+                <button id="btnPDFPendingGlobalDash" class="btn">📄 PDF Pendientes Global</button>
               </div>
             </div>
 
@@ -210,6 +214,11 @@
               </div>
             </div>
 
+            <div class="row wrap" style="margin-top:12px;">
+              <button id="btnPDFPendingGlobal" class="btn">📄 PDF Pendientes Global</button>
+              <button id="btnPDFPendingClient" class="btn ghost">📄 PDF Pendientes Cliente</button>
+            </div>
+
             <div id="repOut" class="reportOut"></div>
           </div>
         </section>
@@ -231,7 +240,6 @@
   </div>
 
   <!-- FIREBASE (Cloud Sync) -->
-  <!-- ✅ Pega tu config real aquí. Si no, funciona en local igualmente. -->
   <script>
     // window.__FIREBASE_CONFIG = {
     //   apiKey: "XXXX",
@@ -246,7 +254,10 @@
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
 
+  <!-- PDF: jsPDF + AutoTable -->
+  <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js"></script>
+
   <script src="./app.js"></script>
 </body>
 </html>
-
