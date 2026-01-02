@@ -19,7 +19,7 @@
       <div class="logo">A</div>
       <div class="brandText">
         <div class="title">ARSLAN • Facturas</div>
-        <div class="subtitle">Estados por cliente · semanas · meses · nube · PDF</div>
+        <div class="subtitle">Estados por cliente · semanas · meses · nube · PDF · usuarios</div>
       </div>
     </div>
 
@@ -34,7 +34,11 @@
   <section id="pinGate" class="gate">
     <div class="gateCard">
       <h2>Acceso protegido</h2>
-      <p class="muted">Introduce tu PIN para entrar al sistema.</p>
+      <p class="muted">Selecciona usuario e introduce el PIN.</p>
+
+      <div class="gateRow">
+        <select id="userSelect" class="input gateSelect"></select>
+      </div>
 
       <div class="gateRow">
         <input id="pinInput" type="password" inputmode="numeric" autocomplete="one-time-code" placeholder="PIN" />
@@ -42,7 +46,10 @@
       </div>
 
       <div id="pinMsg" class="msg"></div>
-      <div class="hint muted">Tip: puedes bloquear con 🔒 arriba.</div>
+
+      <div class="hint muted">
+        Tip: si quieres cambiar de usuario, pulsa 🔒 arriba para volver a la pantalla de acceso.
+      </div>
     </div>
   </section>
 
@@ -56,6 +63,7 @@
         <button class="navItem" data-tab="invoices">🧾 Facturas</button>
         <button class="navItem" data-tab="clients">👥 Clientes</button>
         <button class="navItem" data-tab="reports">📈 Reportes</button>
+        <button class="navItem" data-tab="users">🔐 Usuarios</button>
 
         <div class="sep"></div>
 
@@ -104,7 +112,7 @@
               </div>
 
               <div class="muted" style="margin-top:10px;">
-                Si el PDF no abre, revisa que tu navegador permita descargas y que no bloquee scripts CDN.
+                Usuario activo: <span id="activeUserLabel" class="strong"></span>
               </div>
             </div>
 
@@ -202,7 +210,7 @@
             <div class="card">
               <div class="cardHeader">
                 <h3>Detalle</h3>
-                <span class="pill">PDF por cliente</span>
+                <span class="pill">PDF y gráficos</span>
               </div>
               <div id="clientDetail" class="muted">Selecciona un cliente…</div>
             </div>
@@ -235,6 +243,64 @@
             </div>
 
             <div id="repOut" class="reportOut"></div>
+
+            <div class="grid2" style="margin-top:14px;">
+              <div class="card">
+                <div class="cardHeader">
+                  <h3>📊 Importes por Tag</h3>
+                  <span class="pill">Cliente seleccionado + periodo</span>
+                </div>
+                <div class="chartWrap">
+                  <canvas id="chartByTag"></canvas>
+                </div>
+              </div>
+
+              <div class="card">
+                <div class="cardHeader">
+                  <h3>📈 Evolución (Pendiente vs Pagada)</h3>
+                  <span class="pill">Semanas / Meses</span>
+                </div>
+                <div class="chartWrap">
+                  <canvas id="chartTrend"></canvas>
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </section>
+
+        <!-- USERS -->
+        <section class="tab hidden" id="tab-users">
+          <div class="grid2">
+            <div class="card">
+              <div class="cardHeader">
+                <h3>Usuarios</h3>
+                <button id="btnNewUser" class="btn">+ Nuevo usuario</button>
+              </div>
+              <div class="muted">
+                Cada usuario tiene su propio PIN y sus datos quedan separados (Local + Nube).
+              </div>
+              <div id="usersList" class="list"></div>
+            </div>
+
+            <div class="card">
+              <div class="cardHeader">
+                <h3>Seguridad</h3>
+                <span class="pill">Recomendación</span>
+              </div>
+              <div class="muted">
+                - Usa PINs distintos para cada persona.<br/>
+                - Si quieres, luego añadimos “permisos” (solo lectura / admin).<br/>
+                - Para cambiar de usuario: 🔒 (bloquear) y entrar con otro.
+              </div>
+              <div style="margin-top:12px" class="item">
+                <div>
+                  <div class="name">Usuario activo</div>
+                  <div class="sub" id="activeUserLabel2"></div>
+                </div>
+                <div class="badge warn">Sesión</div>
+              </div>
+            </div>
           </div>
         </section>
 
@@ -272,6 +338,9 @@
   <!-- PDF: jsPDF + AutoTable -->
   <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js"></script>
+
+  <!-- CHARTS -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 
   <script src="./app.js"></script>
 </body>
