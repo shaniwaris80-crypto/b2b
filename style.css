@@ -13,7 +13,7 @@
   --radius:16px;
 }
 
-/* 🌞 MODO DÍA */
+/* 🌞 MODO DÍA (POR DEFECTO) */
 body.light{
   --bg:#f5f7fb;
   --panel:#ffffff;
@@ -38,7 +38,7 @@ body.light{
 
 .hidden{ display:none !important; }
 
-/* resto igual, solo cambié backgrounds a variables */
+/* TOPBAR */
 .topbar{
   position:sticky;
   top:0;
@@ -75,6 +75,7 @@ body.light{
 .cloud-pill.warn{ border-color: color-mix(in srgb, var(--warn) 35%, var(--line)); }
 .cloud-pill.bad{ border-color: color-mix(in srgb, var(--bad) 35%, var(--line)); }
 
+/* BUTTONS / INPUTS */
 .btn{
   border:1px solid color-mix(in srgb, var(--text) 10%, transparent);
   background: color-mix(in srgb, var(--accent) 14%, transparent);
@@ -84,6 +85,7 @@ body.light{
   cursor:pointer;
   font-weight:600;
   transition:.15s ease;
+  white-space:nowrap;
 }
 .btn:hover{ transform: translateY(-1px); }
 .btn:active{ transform: translateY(0px); }
@@ -121,6 +123,7 @@ body.light{
   background: color-mix(in srgb, var(--text) 3%, transparent);
 }
 
+/* LAYOUT */
 .app{ padding:14px; }
 .layout{
   display:grid;
@@ -186,6 +189,7 @@ body.light{
   gap:14px;
 }
 
+/* KPI */
 .kpis{
   display:grid;
   grid-template-columns: repeat(4, 1fr);
@@ -200,6 +204,7 @@ body.light{
 .kLabel{ color:var(--muted); font-size:12px; }
 .kValue{ font-weight:800; font-size:18px; margin-top:4px; }
 
+/* LIST */
 .list{
   display:flex;
   flex-direction:column;
@@ -231,11 +236,12 @@ body.light{
 .badge.warn{ border-color: color-mix(in srgb, var(--warn) 35%, var(--line)); }
 .badge.bad{ border-color: color-mix(in srgb, var(--bad) 35%, var(--line)); }
 
+/* TABLE */
 .tableWrap{ overflow:auto; border-radius:14px; border:1px solid color-mix(in srgb, var(--text) 8%, transparent); }
 .table{
   width:100%;
   border-collapse:collapse;
-  min-width: 900px;
+  min-width: 980px;
 }
 .table th, .table td{
   padding:10px 12px;
@@ -260,6 +266,7 @@ body.light{
   margin-top:10px;
 }
 
+/* SUMMARY */
 .summaryGrid{
   display:grid;
   grid-template-columns: repeat(4, 1fr);
@@ -281,6 +288,7 @@ body.light{
   margin-top:12px;
 }
 
+/* GATE */
 .gate{
   position:fixed; inset:0;
   display:grid; place-items:center;
@@ -313,6 +321,7 @@ body.light .gate{ background: rgba(255,255,255,.60); }
 }
 .msg{ margin-top:10px; color: var(--bad); font-weight:600; min-height:22px; }
 
+/* MODAL */
 .modal{
   position:fixed; inset:0;
   background: rgba(0,0,0,.55);
@@ -362,4 +371,3 @@ textarea.input{ min-height: 88px; resize: vertical; }
   .kpis{ grid-template-columns: 1fr 1fr; }
   .summaryGrid{ grid-template-columns: 1fr 1fr; }
 }
-
