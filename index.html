@@ -11,6 +11,27 @@
 
   <link rel="stylesheet" href="./style.css" />
 </head>
+  <div id="cloudAccountModal" style="display:none;position:fixed;inset:0;background:#0008;z-index:9999;">
+  <div style="background:#fff;max-width:360px;margin:10% auto;padding:20px;border-radius:12px">
+    <h3>☁️ Cuenta Nube</h3>
+
+    <input id="cloudEmail" type="email" placeholder="Email"
+      style="width:100%;margin-bottom:8px">
+
+    <input id="cloudPass" type="password" placeholder="Password"
+      style="width:100%;margin-bottom:12px">
+
+    <button onclick="cloudLoginUI()" style="width:100%">Entrar nube</button>
+    <button onclick="cloudRegisterUI()" style="width:100%;margin-top:6px">
+      Crear cuenta
+    </button>
+
+    <button onclick="closeCloudAccount()" style="width:100%;margin-top:10px">
+      Cerrar
+    </button>
+  </div>
+</div>
+
 
 <body>
   <!-- TOP BAR -->
