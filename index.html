@@ -1,14 +1,9 @@
-<!-- =========================
-     index.html (COMPLETO)
-     ✅ SOLO MEJORAS DE ASPECTO + MÓVIL (MENÚ HAMBURGUESA B)
-     ❌ SIN TOCAR LÓGICA / SIN ACORTAR FUNCIONES
-========================= -->
 <!doctype html>
 <html lang="es">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>ARSLAN • Facturas & Contabilidad</title>
+  <title>ARSLAN PRO • Facturas & Contabilidad</title>
 
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -18,30 +13,26 @@
 </head>
 
 <body class="light">
-  <!-- TOP BAR -->
+
   <header class="topbar">
     <div class="brand">
       <div class="logo">A</div>
       <div class="brandText">
-        <div class="title">ARSLAN • Facturas</div>
-        <div class="subtitle">Estados por cliente · semanas · meses · nube · PDF · usuarios</div>
+        <div class="title">ARSLAN PRO • Facturas</div>
+        <div class="subtitle">Clientes · Tags · Estados · Reportes · PDF · Nube · Usuarios</div>
       </div>
     </div>
 
     <div class="topbarRight">
-      <!-- ✅ NUEVO: Botón hamburguesa (solo móvil) -->
       <label for="navToggle" class="btn ghost mobOnly" title="Menú">☰</label>
-
       <button id="btnTheme" class="btn ghost" title="Modo Día/Noche">☀️</button>
-
       <div id="cloudStatus" class="cloud-pill warn" title="Estado de conexión cloud">☁️ Nube: comprobando…</div>
-
-      <button id="btnCloudQuick" class="btn ghost" title="Abrir Cuenta Nube">☁️</button>
+      <button id="btnCloudQuick" class="btn ghost" title="Cuenta Nube">☁️</button>
       <button id="btnLock" class="btn ghost" title="Bloquear">🔒</button>
     </div>
   </header>
 
-  <!-- PIN GATE -->
+  <!-- PIN -->
   <section id="pinGate" class="gate">
     <div class="gateCard">
       <h2>Acceso protegido</h2>
@@ -66,13 +57,12 @@
 
   <!-- APP -->
   <main id="app" class="app hidden">
-    <!-- ✅ NUEVO: Toggle + overlay (CSS puro, sin JS) -->
+
     <input type="checkbox" id="navToggle" class="navToggle" />
     <label for="navToggle" class="navOverlay"></label>
 
     <div class="layout">
 
-      <!-- LEFT: NAV -->
       <aside class="sidebar">
         <button class="navItem active" data-tab="dashboard">📊 Dashboard</button>
         <button class="navItem" data-tab="invoices">🧾 Facturas</button>
@@ -92,7 +82,6 @@
         <button id="btnClearLocal" class="navItem danger">🧹 Reset local</button>
       </aside>
 
-      <!-- RIGHT: CONTENT -->
       <section class="content">
 
         <!-- DASHBOARD -->
@@ -101,7 +90,7 @@
             <div class="card">
               <div class="cardHeader">
                 <h3>Global</h3>
-                <span class="pill">Pendientes y pagadas</span>
+                <span class="pill">Pendiente · Girada · Cobrada</span>
               </div>
 
               <div class="kpis">
@@ -110,22 +99,23 @@
                   <div id="kpiPendingGlobal" class="kValue">0,00 €</div>
                 </div>
                 <div class="kpi">
-                  <div class="kLabel">Pendientes (nº)</div>
-                  <div id="kpiPendingCount" class="kValue">0</div>
+                  <div class="kLabel">Girada €</div>
+                  <div id="kpiIssuedGlobal" class="kValue">0,00 €</div>
                 </div>
                 <div class="kpi">
-                  <div class="kLabel">Pagadas €</div>
+                  <div class="kLabel">Cobrada €</div>
                   <div id="kpiPaidGlobal" class="kValue">0,00 €</div>
                 </div>
                 <div class="kpi">
-                  <div class="kLabel">Pagadas (nº)</div>
-                  <div id="kpiPaidCount" class="kValue">0</div>
+                  <div class="kLabel">Facturas (nº)</div>
+                  <div id="kpiCountGlobal" class="kValue">0</div>
                 </div>
               </div>
 
               <div class="row wrap" style="margin-top:12px;">
                 <button id="btnPDFPendingGlobalDash" class="btn">📄 PDF Pendientes Global</button>
-                <button id="btnPDFPaidGlobalDash" class="btn ghost">📄 PDF Pagadas Global</button>
+                <button id="btnPDFIssuedGlobalDash" class="btn ghost">📄 PDF Giradas Global</button>
+                <button id="btnPDFPaidGlobalDash" class="btn ghost">📄 PDF Cobradas Global</button>
               </div>
 
               <div class="muted" style="margin-top:10px;">
@@ -147,7 +137,7 @@
           <div class="card">
             <div class="cardHeader">
               <h3>Resumen por periodo</h3>
-              <div class="row">
+              <div class="row wrap">
                 <select id="dashPeriod" class="input">
                   <option value="thisWeek">Esta semana</option>
                   <option value="lastWeek">Semana pasada</option>
@@ -172,12 +162,13 @@
             <div class="cardHeader">
               <h3>Facturas</h3>
               <div class="row wrap">
-                <input id="invSearch" class="input" placeholder="Buscar por nº factura, cliente o tag…" />
+                <input id="invSearch" class="input" placeholder="Buscar nº, cliente o tag…" />
                 <select id="invClientFilter" class="input"></select>
                 <select id="invStatusFilter" class="input">
                   <option value="all">Todos estados</option>
                   <option value="Pendiente">Pendiente</option>
-                  <option value="Pagada">Pagada</option>
+                  <option value="Girada">Girada</option>
+                  <option value="Cobrada">Cobrada</option>
                 </select>
                 <input id="invFrom" type="date" class="input" />
                 <input id="invTo" type="date" class="input" />
@@ -227,7 +218,7 @@
             <div class="card">
               <div class="cardHeader">
                 <h3>Detalle</h3>
-                <span class="pill">PDF y gráficos</span>
+                <span class="pill">PDF + estados</span>
               </div>
               <div id="clientDetail" class="muted">Selecciona un cliente…</div>
             </div>
@@ -255,8 +246,10 @@
             <div class="row wrap" style="margin-top:12px;">
               <button id="btnPDFPendingGlobal" class="btn">📄 PDF Pendientes Global</button>
               <button id="btnPDFPendingClient" class="btn ghost">📄 PDF Pendientes Cliente</button>
-              <button id="btnPDFPaidGlobal" class="btn ghost">📄 PDF Pagadas Global</button>
-              <button id="btnPDFPaidClient" class="btn ghost">📄 PDF Pagadas Cliente</button>
+              <button id="btnPDFIssuedGlobal" class="btn ghost">📄 PDF Giradas Global</button>
+              <button id="btnPDFIssuedClient" class="btn ghost">📄 PDF Giradas Cliente</button>
+              <button id="btnPDFPaidGlobal" class="btn ghost">📄 PDF Cobradas Global</button>
+              <button id="btnPDFPaidClient" class="btn ghost">📄 PDF Cobradas Cliente</button>
             </div>
 
             <div id="repOut" class="reportOut"></div>
@@ -265,7 +258,7 @@
               <div class="card">
                 <div class="cardHeader">
                   <h3>📊 Importes por Tag</h3>
-                  <span class="pill">Cliente seleccionado + periodo</span>
+                  <span class="pill">Cliente + periodo</span>
                 </div>
                 <div class="chartWrap">
                   <canvas id="chartByTag"></canvas>
@@ -274,15 +267,14 @@
 
               <div class="card">
                 <div class="cardHeader">
-                  <h3>📈 Evolución (Pendiente vs Pagada)</h3>
-                  <span class="pill">Semanas / Meses</span>
+                  <h3>📈 Tendencia</h3>
+                  <span class="pill">Pendiente / Girada / Cobrada</span>
                 </div>
                 <div class="chartWrap">
                   <canvas id="chartTrend"></canvas>
                 </div>
               </div>
             </div>
-
           </div>
         </section>
 
@@ -295,7 +287,7 @@
                 <button id="btnNewUser" class="btn">+ Nuevo usuario</button>
               </div>
               <div class="muted">
-                Cada usuario tiene su propio PIN y sus datos quedan separados.
+                Cada usuario tiene su PIN y sus datos quedan separados (por usuario).
               </div>
               <div id="usersList" class="list"></div>
             </div>
@@ -303,11 +295,11 @@
             <div class="card">
               <div class="cardHeader">
                 <h3>Cuenta Nube</h3>
-                <span class="pill">Email/Password · misma nube en todos dispositivos</span>
+                <span class="pill">Email/Password</span>
               </div>
 
               <div class="muted">
-                Entra con el mismo Email/Password en móvil y PC para ver exactamente los mismos datos.
+                Usa el mismo Email/Password en móvil y PC para ver exactamente los mismos datos.
               </div>
 
               <div class="formGrid" style="margin-top:12px;">
@@ -344,7 +336,7 @@
               </div>
 
               <div class="muted" style="margin-top:10px;">
-                Si arriba pone <b>☁️ Nube online</b>, todo lo que hagas se sincroniza automáticamente.
+                Si arriba pone <b>☁️ Nube online</b>, todo se sincroniza automáticamente.
               </div>
             </div>
           </div>
@@ -354,7 +346,6 @@
     </div>
   </main>
 
-  <!-- MODAL (global) -->
   <div id="modal" class="modal hidden">
     <div class="modalCard">
       <div class="modalHeader">
@@ -366,7 +357,7 @@
     </div>
   </div>
 
-  <!-- FIREBASE CONFIG -->
+  <!-- Firebase config (TU CONFIG) -->
   <script>
     window.__FIREBASE_CONFIG = {
       apiKey: "AIzaSyB-9t7QSN-7iDWphqL74SNnpGNmFnIP4E4",
@@ -377,16 +368,13 @@
     };
   </script>
 
-  <!-- FIREBASE compat -->
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
 
-  <!-- PDF: jsPDF + AutoTable -->
   <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js"></script>
 
-  <!-- CHARTS -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 
   <script src="./app.js"></script>
