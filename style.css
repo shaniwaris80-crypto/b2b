@@ -1,3 +1,8 @@
+/* =========================
+   style.css (COMPLETO)
+   ✅ SOLO MEJORAS DE ASPECTO + MÓVIL (MENÚ HAMBURGUESA B)
+   ❌ SIN TOCAR LÓGICA / SIN ACORTAR FUNCIONES
+========================= */
 :root{
   --bg:#0b0f14;
   --panel:#0f1620;
@@ -384,7 +389,7 @@ body.light .modal{ background: rgba(255,255,255,.60); }
 .formGrid .full{ grid-column: 1 / -1; }
 textarea.input{ min-height: 88px; resize: vertical; }
 
-/* RESPONSIVE */
+/* RESPONSIVE (base) */
 @media (max-width: 980px){
   .layout{ grid-template-columns: 1fr; }
   .sidebar{
@@ -399,4 +404,69 @@ textarea.input{ min-height: 88px; resize: vertical; }
   .grid2{ grid-template-columns: 1fr; }
   .kpis{ grid-template-columns: 1fr 1fr; }
   .summaryGrid{ grid-template-columns: 1fr 1fr; }
+}
+
+/* =========================================================
+   ✅ MEJORA MÓVIL: MENÚ HAMBURGUESA (B) - CSS PURO (SIN JS)
+   (Sobrescribe el responsive base para usar drawer)
+========================================================= */
+.mobOnly{ display:none; }
+.navToggle{ display:none; }
+.navOverlay{
+  display:none;
+  position:fixed;
+  inset:0;
+  z-index:59;
+  background: rgba(0,0,0,.45);
+  backdrop-filter: blur(6px);
+}
+
+@media (max-width: 980px){
+
+  .mobOnly{ display:inline-flex; }
+
+  /* layout 1 columna, sidebar tipo drawer */
+  .layout{
+    grid-template-columns: 1fr !important;
+  }
+
+  .sidebar{
+    position: fixed !important;
+    top: 74px !important;
+    left: 12px !important;
+    width: min(320px, 86vw) !important;
+    height: calc(100vh - 92px) !important;
+    z-index: 60 !important;
+    transform: translateX(-115%);
+    transition: transform .18s ease;
+    overflow: auto;
+    display:block !important;
+  }
+
+  /* overlay visible */
+  .navToggle:checked ~ .navOverlay{
+    display:block;
+  }
+
+  /* abrir sidebar */
+  .navToggle:checked ~ .layout .sidebar{
+    transform: translateX(0);
+  }
+
+  /* contenido normal */
+  .content{
+    width:100%;
+  }
+
+  /* mejor tacto en móvil */
+  .btn{ padding:12px 14px; border-radius:14px; }
+  .input{ padding:12px 14px; border-radius:14px; min-width: unset; width:100%; }
+
+  .row{ gap:8px; }
+  .cardHeader .row{ width:100%; }
+  .cardHeader .row .input{ flex:1; }
+
+  .tableWrap{ -webkit-overflow-scrolling: touch; }
+
+  .chartWrap{ height: 340px; }
 }
