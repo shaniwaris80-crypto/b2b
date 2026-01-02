@@ -1,10 +1,10 @@
 /* =========================================================
-   ARSLAN • FACTURAS & CONTABILIDAD (V2.3)
-   - Modo Día por defecto (light), Noche opcional (dark)
-   - Facturas: Pendiente / Pagada + botón rápido en tabla
-   - Tags por cliente (BRASEROS etc.)
-   - PDF corregido y robusto (jsPDF + AutoTable)
-   - Cloud Sync Firebase (opcional)
+   ARSLAN • FACTURAS & CONTABILIDAD (V2.4)
+   ✅ Usuarios + PIN distinto por persona (datos separados)
+   ✅ Gráficos avanzados por cliente (tags + tendencia)
+   ✅ Modo Día por defecto / Noche opcional
+   ✅ PDF robusto (jsPDF + AutoTable)
+   ✅ Cloud Sync Firebase (opcional) por usuario
 ========================================================= */
 
 const $ = (sel) => document.querySelector(sel);
@@ -100,32 +100,54 @@ function readFileAsText(file){
 }
 
 /* ---------------------------
+   HASH (PIN) - SHA-256
+--------------------------- */
+async function sha256Hex(text){
+  const enc = new TextEncoder().encode(text);
+  const buf = await crypto.subtle.digest("SHA-256", enc);
+  const arr = Array.from(new Uint8Array(buf));
+  return arr.map(b=>b.toString(16).padStart(2,"0")).join("");
+}
+
+/* ---------------------------
    STORAGE KEYS
 --------------------------- */
 const K = {
-  PIN_OK: "ARSLAN_PIN_OK_V23",
-  DATA: "ARSLAN_FACTURAS_DATA_V23",
-  CLOUD_LAST_PUSH: "ARSLAN_CLOUD_LAST_PUSH_V23",
-  THEME: "ARSLAN_THEME_V23", // light/dark
+  SESSION_OK: "ARSLAN_SESSION_OK_V24",
+  SESSION_USER: "ARSLAN_SESSION_USER_V24",
+  USERS: "ARSLAN_USERS_V24",
+  THEME: "ARSLAN_THEME_V24",
+  CLOUD_LAST_PUSH: "ARSLAN_CLOUD_LAST_PUSH_V24",
+  // DB per user: `${K.DATA_PREFIX}${userId}`
+  DATA_PREFIX: "ARSLAN_FACTURAS_DATA_V24__",
 };
 
-const PIN_CODE = "7392";
+const DEFAULT_ADMIN_NAME = "ADMIN";
+const DEFAULT_ADMIN_PIN = "7392";
 
 /* ---------------------------
-   DEFAULT DB
+   USERS DB (separado de facturas)
 --------------------------- */
-const DEFAULT_DATA = {
-  version: 23,
-  clients: [
-    { id: "cli_riviera", name: "RIVIERA", phone: "", tags: ["RIVIERA"], notes:"" },
-    { id: "cli_braseros", name: "RESTAURACION HERMANOS MARIJUÁN (BRASEROS)", phone: "", tags: [
-      "BRASEROS CENTRO","BRASEROS SEVERO","BRASEROS EDIFICIO","BRASEROS TOMILLARES"
-    ], notes:"" },
-  ],
-  invoices: [],
-  settings: {
-    currency: "EUR",
-    whatsappTemplate:
+let USERS = []; // {id, name, pinHash, createdAt}
+let ACTIVE_USER_ID = null;
+let ACTIVE_USER_NAME = "";
+
+/* ---------------------------
+   DEFAULT DATA (por usuario)
+--------------------------- */
+function makeDefaultData(){
+  return {
+    version: 24,
+    clients: [
+      { id: "cli_riviera", name: "RIVIERA", phone: "", tags: ["RIVIERA"], notes:"" },
+      { id: "cli_braseros", name: "RESTAURACION HERMANOS MARIJUÁN (BRASEROS)", phone: "", tags: [
+        "BRASEROS CENTRO","BRASEROS SEVERO","BRASEROS EDIFICIO","BRASEROS TOMILLARES"
+      ], notes:"" },
+    ],
+    invoices: [],
+    settings: {
+      currency: "EUR",
+      whatsappTemplate:
 `Hola {cliente},
 Factura: {numero}
 Fecha: {fecha}
@@ -134,14 +156,90 @@ Importe: {importe}
 Estado: PAGADA ✅
 
 Gracias.`,
-  },
-  meta: { updatedAt: Date.now() }
-};
-
-let DB = loadLocal();
+    },
+    meta: { updatedAt: Date.now() }
+  };
+}
 
 /* ---------------------------
-   CLOUD SYNC (FIREBASE)
+   LOAD/SAVE USERS
+--------------------------- */
+function loadUsersRaw(){
+  const raw = localStorage.getItem(K.USERS);
+  if(!raw) return null;
+  try{
+    const u = JSON.parse(raw);
+    if(!Array.isArray(u)) return null;
+    return u;
+  }catch{
+    return null;
+  }
+}
+
+function saveUsers(){
+  localStorage.setItem(K.USERS, JSON.stringify(USERS));
+}
+
+async function ensureUsers(){
+  const loaded = loadUsersRaw();
+  if(loaded && loaded.length){
+    USERS = loaded;
+    return;
+  }
+
+  // crear ADMIN inicial
+  const adminHash = await sha256Hex(DEFAULT_ADMIN_PIN);
+  USERS = [{
+    id: "usr_admin",
+    name: DEFAULT_ADMIN_NAME,
+    pinHash: adminHash,
+    createdAt: Date.now()
+  }];
+  saveUsers();
+}
+
+/* ---------------------------
+   DB per user
+--------------------------- */
+let DB = null;
+
+function keyForUserData(userId){
+  return K.DATA_PREFIX + userId;
+}
+
+function loadLocalDB(userId){
+  const raw = localStorage.getItem(keyForUserData(userId));
+  if(!raw){
+    const d = makeDefaultData();
+    d.meta.updatedAt = Date.now();
+    localStorage.setItem(keyForUserData(userId), JSON.stringify(d));
+    return d;
+  }
+  try{
+    const d = JSON.parse(raw);
+    if(!d || typeof d !== "object") throw new Error("bad");
+    if(!Array.isArray(d.clients)) d.clients = [];
+    if(!Array.isArray(d.invoices)) d.invoices = [];
+    if(!d.settings) d.settings = makeDefaultData().settings;
+    if(!d.meta) d.meta = { updatedAt: Date.now() };
+    return d;
+  }catch{
+    const d = makeDefaultData();
+    d.meta.updatedAt = Date.now();
+    localStorage.setItem(keyForUserData(userId), JSON.stringify(d));
+    return d;
+  }
+}
+
+function saveLocalDB(skipCloud=false){
+  if(!ACTIVE_USER_ID) return;
+  DB.meta.updatedAt = Date.now();
+  localStorage.setItem(keyForUserData(ACTIVE_USER_ID), JSON.stringify(DB));
+  if(!skipCloud) pushCloud();
+}
+
+/* ---------------------------
+   CLOUD SYNC (FIREBASE) por usuario
 --------------------------- */
 const cloudStatus = $("#cloudStatus");
 
@@ -156,6 +254,12 @@ let CLOUD_UID = null;
 let CLOUD_REF = null;
 let CLOUD_LISTENING = false;
 let CLOUD_LOCK = false;
+
+function buildCloudRef(db){
+  // cada usuario tiene su nodo:
+  // arslan_facturas_v24/<firebaseAnonUid>/users/<ACTIVE_USER_ID>/data
+  return db.ref("arslan_facturas_v24/" + CLOUD_UID + "/users/" + ACTIVE_USER_ID + "/data");
+}
 
 function initCloud(){
   try{
@@ -179,41 +283,14 @@ function initCloud(){
 
         CLOUD_UID = user.uid;
         CLOUD_READY = true;
-        CLOUD_REF = db.ref("arslan_facturas_v23/" + CLOUD_UID);
 
         setCloudStatus("ok","☁️ Nube online");
 
-        if(!CLOUD_LISTENING){
-          CLOUD_LISTENING = true;
-          CLOUD_REF.on("value", snap=>{
-            const remote = snap.val();
-            if(!remote) return;
-
-            const remoteUpdated = Number(remote?.meta?.updatedAt || 0);
-            const localUpdated = Number(DB?.meta?.updatedAt || 0);
-
-            if(remoteUpdated > localUpdated){
-              CLOUD_LOCK = true;
-              DB = remote;
-              saveLocal(true);
-              renderAll();
-              CLOUD_LOCK = false;
-            }
-          });
+        // si ya hay usuario activo, engancha la ref
+        if(ACTIVE_USER_ID){
+          attachCloudForActiveUser(db);
         }
 
-        CLOUD_REF.get().then(snap=>{
-          const remote = snap.val();
-          if(!remote){
-            pushCloud();
-          }else{
-            const remoteUpdated = Number(remote?.meta?.updatedAt || 0);
-            const localUpdated = Number(DB?.meta?.updatedAt || 0);
-            if(localUpdated > remoteUpdated){
-              pushCloud();
-            }
-          }
-        }).catch(()=>{});
       });
     }).catch(()=>{
       setCloudStatus("bad","☁️ Error login");
@@ -224,6 +301,56 @@ function initCloud(){
   }
 }
 
+function attachCloudForActiveUser(dbInstance){
+  if(!CLOUD_READY || !ACTIVE_USER_ID) return;
+
+  const db = dbInstance || firebase.database();
+  CLOUD_REF = buildCloudRef(db);
+
+  if(!CLOUD_LISTENING){
+    CLOUD_LISTENING = true;
+  }
+
+  // re-enganchar listener (limpio por si cambiaron de usuario)
+  try{ CLOUD_REF.off(); }catch{}
+
+  CLOUD_REF.on("value", snap=>{
+    const remote = snap.val();
+    if(!remote) return;
+
+    const remoteUpdated = Number(remote?.meta?.updatedAt || 0);
+    const localUpdated = Number(DB?.meta?.updatedAt || 0);
+
+    if(remoteUpdated > localUpdated){
+      CLOUD_LOCK = true;
+      DB = remote;
+      saveLocalDB(true);
+      renderAll();
+      CLOUD_LOCK = false;
+    }
+  });
+
+  // primer sync
+  CLOUD_REF.get().then(snap=>{
+    const remote = snap.val();
+    if(!remote){
+      pushCloud();
+    }else{
+      const remoteUpdated = Number(remote?.meta?.updatedAt || 0);
+      const localUpdated = Number(DB?.meta?.updatedAt || 0);
+      if(localUpdated > remoteUpdated){
+        pushCloud();
+      }else if(remoteUpdated > localUpdated){
+        CLOUD_LOCK = true;
+        DB = remote;
+        saveLocalDB(true);
+        renderAll();
+        CLOUD_LOCK = false;
+      }
+    }
+  }).catch(()=>{});
+}
+
 function pushCloud(){
   if(!CLOUD_READY || !CLOUD_REF) return;
   if(CLOUD_LOCK) return;
@@ -231,39 +358,6 @@ function pushCloud(){
     CLOUD_REF.set(DB);
     localStorage.setItem(K.CLOUD_LAST_PUSH, String(Date.now()));
   }catch{}
-}
-
-/* ---------------------------
-   LOCAL LOAD/SAVE
---------------------------- */
-function loadLocal(){
-  const raw = localStorage.getItem(K.DATA);
-  if(!raw){
-    const d = structuredClone(DEFAULT_DATA);
-    d.meta.updatedAt = Date.now();
-    localStorage.setItem(K.DATA, JSON.stringify(d));
-    return d;
-  }
-  try{
-    const d = JSON.parse(raw);
-    if(!d || typeof d !== "object") throw new Error("bad");
-    if(!Array.isArray(d.clients)) d.clients = [];
-    if(!Array.isArray(d.invoices)) d.invoices = [];
-    if(!d.settings) d.settings = structuredClone(DEFAULT_DATA.settings);
-    if(!d.meta) d.meta = { updatedAt: Date.now() };
-    return d;
-  }catch{
-    const d = structuredClone(DEFAULT_DATA);
-    d.meta.updatedAt = Date.now();
-    localStorage.setItem(K.DATA, JSON.stringify(d));
-    return d;
-  }
-}
-
-function saveLocal(skipCloud=false){
-  DB.meta.updatedAt = Date.now();
-  localStorage.setItem(K.DATA, JSON.stringify(DB));
-  if(!skipCloud) pushCloud();
 }
 
 /* ---------------------------
@@ -281,6 +375,9 @@ function applyTheme(theme){
   document.body.classList.toggle("light", isLight);
   if(btnTheme) btnTheme.textContent = isLight ? "☀️" : "🌙";
   localStorage.setItem(K.THEME, theme);
+
+  // refrescar charts para que se vean bien sobre el fondo
+  setTimeout(()=>updateCharts(), 50);
 }
 
 function toggleTheme(){
@@ -289,38 +386,86 @@ function toggleTheme(){
 }
 
 /* ---------------------------
-   PIN GATE
+   SESSION / PIN GATE (usuarios)
 --------------------------- */
 const pinGate = $("#pinGate");
 const app = $("#app");
+const userSelect = $("#userSelect");
 const pinInput = $("#pinInput");
 const pinBtn = $("#pinBtn");
 const pinMsg = $("#pinMsg");
 const btnLock = $("#btnLock");
 
-function isPinOk(){ return localStorage.getItem(K.PIN_OK) === "1"; }
-function setPinOk(v){ localStorage.setItem(K.PIN_OK, v ? "1" : "0"); }
+const activeUserLabel = $("#activeUserLabel");
+const activeUserLabel2 = $("#activeUserLabel2");
+
+function isSessionOk(){ return localStorage.getItem(K.SESSION_OK) === "1"; }
+function setSessionOk(v){ localStorage.setItem(K.SESSION_OK, v ? "1" : "0"); }
+
+function getSessionUser(){ return localStorage.getItem(K.SESSION_USER) || ""; }
+function setSessionUser(id){ localStorage.setItem(K.SESSION_USER, id || ""); }
 
 function lock(){
-  setPinOk(false);
+  setSessionOk(false);
   app.classList.add("hidden");
   pinGate.classList.remove("hidden");
   pinInput.value = "";
   pinMsg.textContent = "";
-  pinInput.focus();
+  renderUserSelect();
+  userSelect.focus();
 }
 
 function unlock(){
-  setPinOk(true);
+  setSessionOk(true);
   pinGate.classList.add("hidden");
   app.classList.remove("hidden");
   pinMsg.textContent = "";
 }
 
-function checkPin(){
-  const v = safeText(pinInput.value);
-  if(v === PIN_CODE){
+function renderUserSelect(){
+  userSelect.innerHTML = "";
+  const list = USERS.slice().sort((a,b)=>a.name.localeCompare(b.name));
+  for(const u of list){
+    const o = document.createElement("option");
+    o.value = u.id;
+    o.textContent = u.name;
+    userSelect.appendChild(o);
+  }
+
+  const remembered = getSessionUser();
+  const exists = list.some(u=>u.id===remembered);
+  userSelect.value = exists ? remembered : (list[0]?.id || "");
+}
+
+async function checkPin(){
+  const uId = userSelect.value;
+  const u = USERS.find(x=>x.id===uId);
+  if(!u){
+    pinMsg.textContent = "Usuario inválido";
+    return;
+  }
+  const entered = safeText(pinInput.value);
+  if(!entered){
+    pinMsg.textContent = "Introduce el PIN";
+    return;
+  }
+
+  const enteredHash = await sha256Hex(entered);
+  if(enteredHash === u.pinHash){
+    ACTIVE_USER_ID = u.id;
+    ACTIVE_USER_NAME = u.name;
+
+    setSessionUser(u.id);
     unlock();
+
+    // cargar DB del usuario
+    DB = loadLocalDB(ACTIVE_USER_ID);
+
+    // enganchar nube para este usuario
+    if(CLOUD_READY){
+      attachCloudForActiveUser(firebase.database());
+    }
+
     renderAll();
   }else{
     pinMsg.textContent = "PIN incorrecto";
@@ -335,6 +480,7 @@ const tabs = {
   invoices: $("#tab-invoices"),
   clients: $("#tab-clients"),
   reports: $("#tab-reports"),
+  users: $("#tab-users"),
 };
 
 function showTab(key){
@@ -344,6 +490,10 @@ function showTab(key){
   Object.keys(tabs).forEach(k=>{
     tabs[k].classList.toggle("hidden", k!==key);
   });
+
+  if(key==="reports"){
+    setTimeout(()=>updateCharts(), 50);
+  }
 }
 
 /* ---------------------------
@@ -672,7 +822,7 @@ function toggleInvoiceStatus(id){
   if(!inv) return;
   inv.status = inv.status==="Pagada" ? "Pendiente" : "Pagada";
   normalizeInvoice(inv);
-  saveLocal();
+  saveLocalDB();
   renderAll();
 }
 
@@ -705,7 +855,7 @@ function deleteInvoice(id){
   ok.textContent = "Borrar";
   ok.onclick = ()=>{
     DB.invoices = DB.invoices.filter(x=>x.id!==id);
-    saveLocal();
+    saveLocalDB();
     closeModal();
     renderAll();
   };
@@ -744,7 +894,7 @@ function fillTagSelect(tagSelect, clientId, preferValue=""){
   }
 
   const exists = opts.some(o=>o.value === preferValue);
-  tagSelect.value = exists ? preferValue : opts[0].value; // default: primero
+  tagSelect.value = exists ? preferValue : opts[0].value;
 }
 
 /* ---------------------------
@@ -906,7 +1056,7 @@ function openInvoiceModal(editId=null){
       DB.invoices.push(newInv);
     }
 
-    saveLocal();
+    saveLocalDB();
     closeModal();
     renderAll();
   };
@@ -1091,7 +1241,11 @@ function renderClientDetail(){
 
   actions.append(edit, addTag, pdfPend, pdfPaid);
 
-  wrap.append(top, actions);
+  const tip = document.createElement("div");
+  tip.className = "muted";
+  tip.textContent = "Gráficos avanzados están en Reportes → selecciona este cliente y el periodo.";
+
+  wrap.append(top, actions, tip);
   clientDetail.innerHTML = "";
   clientDetail.appendChild(wrap);
 }
@@ -1145,7 +1299,7 @@ function openClientModal(editId=null){
       selectedClientId = newC.id;
     }
 
-    saveLocal();
+    saveLocalDB();
     closeModal();
     renderAll();
   };
@@ -1180,7 +1334,7 @@ function openAddTagModal(clientId){
     if(!tag) return;
     c.tags = Array.isArray(c.tags) ? c.tags : [];
     if(!c.tags.includes(tag)) c.tags.push(tag);
-    saveLocal();
+    saveLocalDB();
     closeModal();
     renderAll();
   };
@@ -1230,6 +1384,7 @@ function runReports(){
   const invs = getInvoicesFiltered({ q:"", clientId, status:"all", fromISO, toISO });
   if(invs.length===0){
     repOut.innerHTML = `<div class="muted">No hay facturas en ese periodo.</div>`;
+    updateCharts(); // limpia
     return;
   }
 
@@ -1240,7 +1395,7 @@ function runReports(){
   box.innerHTML = `
     <div>
       <div class="name">Resumen ${escapeHtml(fromISO||"")} → ${escapeHtml(toISO||"")}</div>
-      <div class="sub">${invs.length} factura(s)</div>
+      <div class="sub">${invs.length} factura(s) · Cliente: ${escapeHtml(clientId==="all" ? "Todos" : (getClientById(clientId)?.name||""))}</div>
     </div>
     <div class="row wrap">
       <span class="badge bad">Pend: ${money(sums.Pendiente)}</span>
@@ -1249,13 +1404,14 @@ function runReports(){
     </div>
   `;
   repOut.appendChild(box);
+
+  updateCharts();
 }
 
 /* ---------------------------
-   PDF (CORREGIDO Y ROBUSTO)
+   PDF (ROBUSTO)
 --------------------------- */
 function ensurePDFLibs(){
-  // jsPDF UMD
   const hasUMD = !!window.jspdf;
   const hasJsPDF = hasUMD && typeof window.jspdf.jsPDF === "function";
   const jsPDF = hasJsPDF ? window.jspdf.jsPDF : null;
@@ -1321,7 +1477,6 @@ function generateStatusPDF(statusWanted, scope="global", clientId=null){
     const now = new Date();
     const created = `${toISODate(now)} ${String(now.getHours()).padStart(2,"0")}:${String(now.getMinutes()).padStart(2,"0")}`;
 
-    // datos
     let list = DB.invoices.filter(i=>i.status === statusWanted);
     let title = `${statusWanted} (Global)`;
 
@@ -1331,14 +1486,12 @@ function generateStatusPDF(statusWanted, scope="global", clientId=null){
       list = list.filter(i=>i.clientId===clientId);
     }
 
-    // orden por fecha asc para PDF
     list = list.slice().sort((a,b)=>{
       const da = parseISODate(a.dateISO)?.getTime() || 0;
       const db = parseISODate(b.dateISO)?.getTime() || 0;
       return da - db;
     });
 
-    // header
     doc.setFont("helvetica","bold");
     doc.setFontSize(16);
     doc.text("ARSLAN • Reporte", margin, 52);
@@ -1350,7 +1503,6 @@ function generateStatusPDF(statusWanted, scope="global", clientId=null){
     doc.setFontSize(10);
     doc.text(`Generado: ${created}`, margin, 92);
 
-    // resumen
     const total = list.reduce((s,i)=>s+Number(i.amount||0),0);
     doc.setFont("helvetica","bold");
     doc.setFontSize(12);
@@ -1364,11 +1516,9 @@ function generateStatusPDF(statusWanted, scope="global", clientId=null){
       return;
     }
 
-    // colores cabecera (jsPDF-autotable espera RGB)
     const headFill = [30, 42, 58];
 
     if(scope==="global"){
-      // agrupado por cliente
       const groups = new Map();
       for(const inv of list){
         const name = inv.clientNameCache || "(Sin cliente)";
@@ -1443,7 +1593,6 @@ function generateStatusPDF(statusWanted, scope="global", clientId=null){
       doc.text(`TOTAL ${statusWanted.toUpperCase()}: ${money(total)}`, margin, Math.min(780, y));
     }
 
-    // footer pages
     const pageCount = doc.internal.getNumberOfPages();
     for(let p=1; p<=pageCount; p++){
       doc.setPage(p);
@@ -1460,6 +1609,323 @@ function generateStatusPDF(statusWanted, scope="global", clientId=null){
 }
 
 /* ---------------------------
+   CHARTS (Chart.js)
+--------------------------- */
+let chartByTag = null;
+let chartTrend = null;
+
+const chartByTagCanvas = $("#chartByTag");
+const chartTrendCanvas = $("#chartTrend");
+
+function ensureCharts(){
+  if(!window.Chart) return;
+
+  if(chartByTagCanvas && !chartByTag){
+    chartByTag = new Chart(chartByTagCanvas, {
+      type: "bar",
+      data: { labels: [], datasets: [{ label: "Importe (€)", data: [] }] },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { display: true } },
+        scales: {
+          y: { ticks: { callback: (v)=>Number(v).toLocaleString("es-ES") } }
+        }
+      }
+    });
+  }
+
+  if(chartTrendCanvas && !chartTrend){
+    chartTrend = new Chart(chartTrendCanvas, {
+      type: "line",
+      data: {
+        labels: [],
+        datasets: [
+          { label: "Pendiente (€)", data: [], tension: 0.25 },
+          { label: "Pagada (€)", data: [], tension: 0.25 },
+        ]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { display: true } },
+        scales: {
+          y: { ticks: { callback: (v)=>Number(v).toLocaleString("es-ES") } }
+        }
+      }
+    });
+  }
+}
+
+function getReportRange(){
+  let fromISO = repFrom?.value || "";
+  let toISO = repTo?.value || "";
+  ({fromISO, toISO} = clampDateRange(fromISO, toISO));
+  return { fromISO, toISO };
+}
+
+function bucketLabel(date, mode){
+  if(mode==="monthly"){
+    const y = date.getFullYear();
+    const m = String(date.getMonth()+1).padStart(2,"0");
+    return `${y}-${m}`;
+  }
+  const s = startOfWeek(date);
+  return `W ${toISODate(s)}`;
+}
+
+function buildTrendBuckets(invs, mode){
+  const mapPend = new Map();
+  const mapPaid = new Map();
+
+  for(const inv of invs){
+    const d = parseISODate(inv.dateISO);
+    if(!d) continue;
+    const key = bucketLabel(d, mode);
+    const amt = Number(inv.amount||0);
+
+    if(inv.status==="Pendiente"){
+      mapPend.set(key, (mapPend.get(key)||0) + amt);
+    }else if(inv.status==="Pagada"){
+      mapPaid.set(key, (mapPaid.get(key)||0) + amt);
+    }
+  }
+
+  // union keys ordenados por fecha
+  const keys = new Set([...mapPend.keys(), ...mapPaid.keys()]);
+  const arr = Array.from(keys);
+
+  const sortBy = (k)=>{
+    if(mode==="monthly"){
+      const [y,m] = k.replace("W ","").split("-").map(Number);
+      return new Date(y, (m||1)-1, 1).getTime();
+    }
+    // W YYYY-MM-DD
+    const iso = k.replace("W ","");
+    return parseISODate(iso)?.getTime() || 0;
+  };
+
+  arr.sort((a,b)=>sortBy(a)-sortBy(b));
+
+  const pend = arr.map(k=> mapPend.get(k)||0);
+  const paid = arr.map(k=> mapPaid.get(k)||0);
+  return { labels: arr, pend, paid };
+}
+
+function buildByTag(invs){
+  const map = new Map();
+  for(const inv of invs){
+    const tag = safeText(inv.tag || "(Sin tag)");
+    const amt = Number(inv.amount||0);
+    map.set(tag, (map.get(tag)||0) + amt);
+  }
+  const rows = Array.from(map.entries()).map(([tag,amt])=>({tag, amt}));
+  rows.sort((a,b)=>b.amt-a.amt);
+  return { labels: rows.map(r=>r.tag), data: rows.map(r=>r.amt) };
+}
+
+function updateCharts(){
+  if(!DB) return;
+  ensureCharts();
+  if(!chartByTag || !chartTrend) return;
+
+  const { fromISO, toISO } = getReportRange();
+  const clientId = repClient?.value || "all";
+  const mode = repMode?.value || "weekly";
+
+  const invs = getInvoicesFiltered({
+    q:"",
+    clientId,
+    status:"all",
+    fromISO,
+    toISO
+  });
+
+  // 1) Bar: importe por tag (total, incluye pend+pag)
+  const byTag = buildByTag(invs);
+  chartByTag.data.labels = byTag.labels;
+  chartByTag.data.datasets[0].data = byTag.data;
+  chartByTag.update();
+
+  // 2) Line: tendencia por semana/mes separando pend vs pag
+  const tr = buildTrendBuckets(invs, mode==="monthly" ? "monthly" : "weekly");
+  chartTrend.data.labels = tr.labels;
+  chartTrend.data.datasets[0].data = tr.pend;
+  chartTrend.data.datasets[1].data = tr.paid;
+  chartTrend.update();
+}
+
+/* ---------------------------
+   USERS TAB (crear / cambiar PIN / borrar)
+--------------------------- */
+const btnNewUser = $("#btnNewUser");
+const usersList = $("#usersList");
+
+function renderUsersTab(){
+  usersList.innerHTML = "";
+  const list = USERS.slice().sort((a,b)=>a.name.localeCompare(b.name));
+
+  for(const u of list){
+    const el = document.createElement("div");
+    el.className = "item";
+    el.innerHTML = `
+      <div>
+        <div class="name">${escapeHtml(u.name)}</div>
+        <div class="sub">ID: ${escapeHtml(u.id)}</div>
+      </div>
+      <div class="row wrap">
+        <button class="btn ghost" data-act="pin" data-id="${u.id}">Cambiar PIN</button>
+        <button class="btn ghost danger" data-act="del" data-id="${u.id}">Borrar</button>
+      </div>
+    `;
+    usersList.appendChild(el);
+  }
+
+  usersList.querySelectorAll("button[data-act]").forEach(b=>{
+    b.addEventListener("click", ()=>{
+      const act = b.dataset.act;
+      const id = b.dataset.id;
+      if(act==="pin") openChangePinModal(id);
+      if(act==="del") openDeleteUserModal(id);
+    });
+  });
+}
+
+function openNewUserModal(){
+  const body = document.createElement("div");
+  body.className = "formGrid";
+
+  const name = mkInput("Nombre usuario", "text", "");
+  const pin = mkInput("PIN (numérico)", "password", "");
+  pin.input.inputMode = "numeric";
+
+  name.wrap.classList.add("full");
+  pin.wrap.classList.add("full");
+
+  body.append(name.wrap, pin.wrap);
+
+  const foot = document.createElement("div");
+  foot.className = "row";
+
+  const cancel = document.createElement("button");
+  cancel.className="btn ghost";
+  cancel.textContent="Cancelar";
+  cancel.onclick=closeModal;
+
+  const create = document.createElement("button");
+  create.className="btn";
+  create.textContent="Crear";
+
+  create.onclick = async ()=>{
+    const nm = safeText(name.input.value);
+    const p = safeText(pin.input.value);
+    if(!nm || !p){
+      alert("Nombre y PIN son obligatorios.");
+      return;
+    }
+    if(USERS.some(u=>u.name.toLowerCase()===nm.toLowerCase())){
+      alert("Ya existe un usuario con ese nombre.");
+      return;
+    }
+
+    const hash = await sha256Hex(p);
+    const newU = { id:"usr_"+uid(), name:nm, pinHash: hash, createdAt: Date.now() };
+    USERS.push(newU);
+    saveUsers();
+    closeModal();
+    renderUsersTab();
+    renderUserSelect();
+  };
+
+  foot.append(cancel, create);
+  openModal("Nuevo usuario", body, foot);
+}
+
+function openChangePinModal(userId){
+  const u = USERS.find(x=>x.id===userId);
+  if(!u) return;
+
+  const body = document.createElement("div");
+  body.className = "formGrid";
+
+  const pin = mkInput("Nuevo PIN", "password", "");
+  pin.wrap.classList.add("full");
+  pin.input.inputMode = "numeric";
+
+  const note = document.createElement("div");
+  note.className = "muted full";
+  note.textContent = "Este PIN solo afecta a este usuario. Sus datos se mantienen.";
+
+  body.append(pin.wrap, note);
+
+  const foot = document.createElement("div");
+  foot.className="row";
+
+  const cancel = document.createElement("button");
+  cancel.className="btn ghost";
+  cancel.textContent="Cancelar";
+  cancel.onclick=closeModal;
+
+  const save = document.createElement("button");
+  save.className="btn";
+  save.textContent="Guardar";
+
+  save.onclick = async ()=>{
+    const p = safeText(pin.input.value);
+    if(!p){ alert("Introduce el nuevo PIN."); return; }
+    u.pinHash = await sha256Hex(p);
+    saveUsers();
+    closeModal();
+    renderUsersTab();
+    renderUserSelect();
+  };
+
+  foot.append(cancel, save);
+  openModal(`Cambiar PIN — ${u.name}`, body, foot);
+}
+
+function openDeleteUserModal(userId){
+  const u = USERS.find(x=>x.id===userId);
+  if(!u) return;
+
+  if(u.id==="usr_admin"){
+    alert("No se puede borrar ADMIN.");
+    return;
+  }
+
+  const body = document.createElement("div");
+  body.innerHTML = `
+    <div class="muted">¿Borrar usuario <b>${escapeHtml(u.name)}</b>?</div>
+    <div class="muted" style="margin-top:8px">
+      Esto elimina el usuario del login. Los datos locales del usuario se pueden borrar manualmente con Reset local (si estás dentro de ese usuario).
+    </div>
+  `;
+
+  const foot = document.createElement("div");
+  foot.className="row";
+
+  const cancel = document.createElement("button");
+  cancel.className="btn ghost";
+  cancel.textContent="Cancelar";
+  cancel.onclick=closeModal;
+
+  const del = document.createElement("button");
+  del.className="btn danger";
+  del.textContent="Borrar";
+
+  del.onclick=()=>{
+    USERS = USERS.filter(x=>x.id!==userId);
+    saveUsers();
+    closeModal();
+    renderUsersTab();
+    renderUserSelect();
+  };
+
+  foot.append(cancel, del);
+  openModal("Borrar usuario", body, foot);
+}
+
+/* ---------------------------
    EXPORT / IMPORT / RESET
 --------------------------- */
 const btnExport = $("#btnExport");
@@ -1473,16 +1939,16 @@ async function doImport(file){
   if(!Array.isArray(obj.clients) || !Array.isArray(obj.invoices)) throw new Error("Estructura inválida");
 
   DB = obj;
-  if(!DB.settings) DB.settings = structuredClone(DEFAULT_DATA.settings);
+  if(!DB.settings) DB.settings = makeDefaultData().settings;
   if(!DB.meta) DB.meta = { updatedAt: Date.now() };
 
-  saveLocal();
+  saveLocalDB();
   renderAll();
 }
 
 function resetLocal(){
   const body = document.createElement("div");
-  body.innerHTML = `<div class="muted">Esto borra el almacenamiento local y restaura datos iniciales. La nube (si está activa) puede volver a sincronizar datos luego.</div>`;
+  body.innerHTML = `<div class="muted">Esto borra el almacenamiento local <b>del usuario activo</b> y restaura datos iniciales. La nube (si está activa) puede volver a sincronizar datos luego.</div>`;
 
   const foot = document.createElement("div");
   foot.className="row";
@@ -1496,26 +1962,33 @@ function resetLocal(){
   ok.className="btn danger";
   ok.textContent="Reset";
   ok.onclick=()=>{
-    localStorage.removeItem(K.DATA);
-    DB = loadLocal();
+    if(!ACTIVE_USER_ID) return;
+    localStorage.removeItem(keyForUserData(ACTIVE_USER_ID));
+    DB = loadLocalDB(ACTIVE_USER_ID);
     closeModal();
     renderAll();
   };
 
   foot.append(cancel, ok);
-  openModal("Reset local", body, foot);
+  openModal("Reset local (usuario activo)", body, foot);
 }
 
 /* ---------------------------
    MAIN RENDER
 --------------------------- */
 function renderAll(){
+  // usuario labels
+  if(activeUserLabel) activeUserLabel.textContent = ACTIVE_USER_NAME || "";
+  if(activeUserLabel2) activeUserLabel2.textContent = ACTIVE_USER_NAME || "";
+
   renderClientSelects();
   renderKPIs();
   renderPendingByClient();
   renderDashSummary();
   renderInvoices();
   renderClients();
+  renderUsersTab();
+  updateCharts();
 }
 
 /* ---------------------------
@@ -1525,7 +1998,7 @@ function bindEvents(){
   // theme
   btnTheme?.addEventListener("click", toggleTheme);
 
-  // PIN
+  // PIN / Session
   pinBtn?.addEventListener("click", checkPin);
   pinInput?.addEventListener("keydown",(e)=>{ if(e.key==="Enter") checkPin(); });
   btnLock?.addEventListener("click", lock);
@@ -1582,7 +2055,12 @@ function bindEvents(){
       repFrom.value = toISODate(startOfMonth(now));
       repTo.value = toISODate(endOfMonth(now));
     }
+    updateCharts();
   });
+
+  repFrom?.addEventListener("change", updateCharts);
+  repTo?.addEventListener("change", updateCharts);
+  repClient?.addEventListener("change", updateCharts);
 
   btnPDFPendingGlobal?.addEventListener("click", ()=>generateStatusPDF("Pendiente", "global"));
   btnPDFPendingClient?.addEventListener("click", ()=>{
@@ -1604,10 +2082,13 @@ function bindEvents(){
     generateStatusPDF("Pagada", "client", id);
   });
 
+  // Users
+  btnNewUser?.addEventListener("click", openNewUserModal);
+
   // Export/Import/Reset
   btnExport?.addEventListener("click", ()=>{
     const stamp = new Date();
-    downloadJSON(DB, `facturas_backup_${toISODate(stamp)}.json`);
+    downloadJSON(DB, `facturas_${ACTIVE_USER_NAME || "usuario"}_${toISODate(stamp)}.json`);
   });
 
   fileImport?.addEventListener("change", async ()=>{
@@ -1629,31 +2110,44 @@ function bindEvents(){
 /* ---------------------------
    INIT
 --------------------------- */
-(function init(){
-  // tema por defecto: DÍA (light)
+(async function init(){
   applyTheme(getTheme());
+
+  await ensureUsers();
+  renderUserSelect();
 
   bindEvents();
 
-  if(isPinOk()){
+  // intentar restaurar sesión
+  const rememberedUser = getSessionUser();
+  const hasUser = USERS.some(u=>u.id===rememberedUser);
+
+  if(isSessionOk() && hasUser){
+    ACTIVE_USER_ID = rememberedUser;
+    ACTIVE_USER_NAME = USERS.find(u=>u.id===rememberedUser)?.name || "";
+    DB = loadLocalDB(ACTIVE_USER_ID);
     unlock();
     renderAll();
   }else{
     lock();
   }
 
-  // Default dates
+  // fechas por defecto reportes
   const now = new Date();
+  const repFromEl = $("#repFrom");
+  const repToEl = $("#repTo");
+  if(repFromEl) repFromEl.value = toISODate(startOfWeek(now));
+  if(repToEl) repToEl.value = toISODate(endOfWeek(now));
 
-  // Dashboard
-  dashFrom.value = toISODate(startOfWeek(now));
-  dashTo.value = toISODate(endOfWeek(now));
-  dashFrom.disabled = true;
-  dashTo.disabled = true;
-
-  // Reports
-  repFrom.value = toISODate(startOfWeek(now));
-  repTo.value = toISODate(endOfWeek(now));
+  // dashboard range
+  const dashFromEl = $("#dashFrom");
+  const dashToEl = $("#dashTo");
+  if(dashFromEl && dashToEl){
+    dashFromEl.value = toISODate(startOfWeek(now));
+    dashToEl.value = toISODate(endOfWeek(now));
+    dashFromEl.disabled = true;
+    dashToEl.disabled = true;
+  }
 
   initCloud();
 })();
