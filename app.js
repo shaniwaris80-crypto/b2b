@@ -7,6 +7,21 @@
    ✅ Modo Día por defecto / Noche opcional
    ✅ Tags por cliente (Braseros: Centro/Severo/Edificio/Tomillares)
    ✅ Gráficos por cliente (Reportes)
+
+   ✅ NUEVO (C️⃣ MERGE INTELIGENTE)
+   - Merge local + cloud (no pisa datos si un dispositivo inicia “vacío”)
+   - Dedup facturas por:
+       1) id si coincide
+       2) (fechaISO + numero + clienteNombre) si id diferente
+   - Merge clientes por:
+       1) id
+       2) nombre (case-insensitive)
+   - Re-map clientId en facturas si se unifican clientes
+   - Si nube tiene datos y local está “default vacío”, se trae nube (NO se sobrescribe nube)
+
+   ✅ NUEVO (Bulk pegado “simple”)
+   - Permite pegar líneas tipo:
+     2025-10-27 FA-20251027-105447 BRASEROS CENTRO 175,10
 ========================================================= */
 
 const $ = (sel) => document.querySelector(sel);
@@ -120,7 +135,10 @@ const K = {
   USERS: "ARSLAN_USERS_V26B",
   THEME: "ARSLAN_THEME_V26B",
   DATA_PREFIX: "ARSLAN_FACTURAS_DATA_V26B__",
-  CLOUD_EMAIL_LAST: "ARSLAN_CLOUD_EMAIL_LAST_V26B"
+  CLOUD_EMAIL_LAST: "ARSLAN_CLOUD_EMAIL_LAST_V26B",
+
+  // ✅ NUEVO: marca que ya hicimos merge inicial con nube para (cloudUID + userId)
+  CLOUD_MERGED_PREFIX: "ARSLAN_CLOUD_MERGED_V26B__"
 };
 
 const DEFAULT_ADMIN_NAME = "ADMIN";
@@ -238,7 +256,281 @@ function saveLocalDB(skipCloud=false){
 }
 
 /* =========================================================
-   CLOUD SYNC (EMAIL/PASSWORD REAL)
+   MERGE INTELIGENTE (LOCAL + CLOUD)
+========================================================= */
+function deepClone(obj){
+  return JSON.parse(JSON.stringify(obj));
+}
+
+function normName(s){
+  return safeText(s).toLowerCase();
+}
+
+function isDefaultLikeDB(d){
+  // Heurística: sin facturas y 1-2 clientes (los de default)
+  if(!d || typeof d !== "object") return true;
+  const invN = Array.isArray(d.invoices) ? d.invoices.length : 0;
+  const cliN = Array.isArray(d.clients) ? d.clients.length : 0;
+  if(invN > 0) return false;
+
+  // Si solo tiene los defaults o casi vacía, la tratamos como “vacía”
+  if(cliN <= 2) return true;
+
+  // Si tiene más clientes pero sin facturas, puede ser real… pero preferimos no pisar.
+  // Aun así, para seguridad, no la marcamos como vacía:
+  return false;
+}
+
+function ensureDBShape(d){
+  const out = d && typeof d === "object" ? d : makeDefaultData();
+  if(!Array.isArray(out.clients)) out.clients = [];
+  if(!Array.isArray(out.invoices)) out.invoices = [];
+  if(!out.settings) out.settings = makeDefaultData().settings;
+  if(!out.meta) out.meta = { updatedAt: Date.now() };
+  if(!out.version) out.version = 26;
+  return out;
+}
+
+function mergeClients(localClients, remoteClients){
+  // Devuelve { clientsMerged, clientIdRemap }
+  const l = Array.isArray(localClients) ? localClients : [];
+  const r = Array.isArray(remoteClients) ? remoteClients : [];
+
+  const byId = new Map();
+  const byName = new Map(); // nameLower -> id
+
+  const clientIdRemap = new Map(); // oldId -> newId
+
+  function addClient(c){
+    if(!c || typeof c !== "object") return;
+    const id = safeText(c.id);
+    const name = safeText(c.name);
+    if(!id || !name) return;
+
+    if(!byId.has(id)){
+      const cc = deepClone(c);
+      if(!Array.isArray(cc.tags)) cc.tags = [];
+      if(!cc.tags.includes(cc.name)) cc.tags.push(cc.name);
+      byId.set(id, cc);
+      byName.set(normName(name), id);
+      return;
+    }
+
+    // si ya existe por id, merge suave
+    const existing = byId.get(id);
+    existing.name = existing.name || name;
+    existing.phone = existing.phone || c.phone || "";
+    existing.notes = existing.notes || c.notes || "";
+    existing.tags = Array.isArray(existing.tags) ? existing.tags : [];
+    const tags2 = Array.isArray(c.tags) ? c.tags : [];
+    for(const t of tags2){
+      const tt = safeText(t);
+      if(tt && !existing.tags.includes(tt)) existing.tags.push(tt);
+    }
+  }
+
+  // 1) meter locales
+  for(const c of l) addClient(c);
+
+  // 2) meter remotos, unificando por nombre si id diferente
+  for(const c of r){
+    if(!c || typeof c !== "object") continue;
+    const rid = safeText(c.id);
+    const rname = safeText(c.name);
+    if(!rid || !rname) { addClient(c); continue; }
+
+    const key = normName(rname);
+    const existingIdByName = byName.get(key);
+
+    if(existingIdByName && existingIdByName !== rid){
+      // unificar: remap rid -> existingIdByName
+      clientIdRemap.set(rid, existingIdByName);
+      // merge campos y tags al existente
+      const ex = byId.get(existingIdByName);
+      if(ex){
+        ex.phone = ex.phone || c.phone || "";
+        ex.notes = ex.notes || c.notes || "";
+        ex.tags = Array.isArray(ex.tags) ? ex.tags : [];
+        const tags2 = Array.isArray(c.tags) ? c.tags : [];
+        for(const t of tags2){
+          const tt = safeText(t);
+          if(tt && !ex.tags.includes(tt)) ex.tags.push(tt);
+        }
+      }
+      continue;
+    }
+
+    addClient(c);
+  }
+
+  return {
+    clientsMerged: Array.from(byId.values()),
+    clientIdRemap
+  };
+}
+
+function invoiceKey(inv){
+  // Clave “inteligente” para dedup si id es distinto:
+  // fecha + numero + clienteNombreCache (case-insensitive)
+  const d = safeText(inv?.dateISO || "");
+  const n = safeText(inv?.number || "");
+  const c = normName(inv?.clientNameCache || "");
+  return `${d}__${n}__${c}`;
+}
+
+function mergeInvoices(localInvoices, remoteInvoices, clientIdRemap){
+  const l = Array.isArray(localInvoices) ? localInvoices : [];
+  const r = Array.isArray(remoteInvoices) ? remoteInvoices : [];
+
+  const byId = new Map();   // id -> invoice
+  const byKey = new Map();  // key -> id
+
+  function normalizeAndFix(inv){
+    const x = deepClone(inv || {});
+    // remap clientId si procede
+    const cid = safeText(x.clientId);
+    if(cid && clientIdRemap && clientIdRemap.has(cid)){
+      x.clientId = clientIdRemap.get(cid);
+    }
+    if(!x.id) x.id = "inv_" + uid();
+    if(!x.createdAt) x.createdAt = Date.now();
+    if(!x.updatedAt) x.updatedAt = Date.now();
+    if(!x.status) x.status = "Pendiente";
+    if(typeof x.amount !== "number") x.amount = Number(x.amount || 0);
+    return x;
+  }
+
+  function upsert(inv){
+    const x = normalizeAndFix(inv);
+    const id = safeText(x.id);
+    const key = invoiceKey(x);
+
+    // 1) si ya existe por id
+    if(byId.has(id)){
+      const ex = byId.get(id);
+      // gana el más nuevo por updatedAt
+      const a = Number(ex.updatedAt||0);
+      const b = Number(x.updatedAt||0);
+      const winner = (b > a) ? x : ex;
+      const loser  = (b > a) ? ex : x;
+
+      // merge campos no vacíos del loser hacia winner (sin pisar winner)
+      // (solo si winner los tiene vacíos)
+      if(!winner.tag && loser.tag) winner.tag = loser.tag;
+      if(!winner.notes && loser.notes) winner.notes = loser.notes;
+      if(!winner.clientNameCache && loser.clientNameCache) winner.clientNameCache = loser.clientNameCache;
+
+      // status: si el ganador es “Pendiente” pero el otro es “Pagada” y tienen mismo updatedAt,
+      // preferimos Pagada (más seguro)
+      if(Number(ex.updatedAt||0) === Number(x.updatedAt||0)){
+        if(ex.status==="Pagada" || x.status==="Pagada") winner.status = "Pagada";
+      }
+
+      byId.set(id, winner);
+      byKey.set(invoiceKey(winner), id);
+      return;
+    }
+
+    // 2) dedup por key (fecha+numero+clienteNombre)
+    if(byKey.has(key)){
+      const existingId = byKey.get(key);
+      const ex = byId.get(existingId);
+      if(ex){
+        const a = Number(ex.updatedAt||0);
+        const b = Number(x.updatedAt||0);
+        const winner = (b > a) ? x : ex;
+        const loser  = (b > a) ? ex : x;
+
+        // conservar id existente (para estabilidad) si el existing es el ganador
+        if(winner === x){
+          // reemplazamos ex por x, pero mantenemos el id existente (para no romper referencias)
+          const keepId = ex.id;
+          winner.id = keepId;
+        }
+
+        if(!winner.tag && loser.tag) winner.tag = loser.tag;
+        if(!winner.notes && loser.notes) winner.notes = loser.notes;
+        if(!winner.clientNameCache && loser.clientNameCache) winner.clientNameCache = loser.clientNameCache;
+
+        // empate: preferir Pagada
+        if(a === b){
+          if(ex.status==="Pagada" || x.status==="Pagada") winner.status = "Pagada";
+        }
+
+        byId.set(winner.id, winner);
+        byKey.set(invoiceKey(winner), winner.id);
+      }
+      return;
+    }
+
+    // nuevo
+    byId.set(id, x);
+    byKey.set(key, id);
+  }
+
+  for(const inv of l) upsert(inv);
+  for(const inv of r) upsert(inv);
+
+  return Array.from(byId.values());
+}
+
+function mergeDataSmart(localData, remoteData){
+  const L = ensureDBShape(deepClone(localData));
+  const R = ensureDBShape(deepClone(remoteData));
+
+  // merge clients + remap
+  const { clientsMerged, clientIdRemap } = mergeClients(L.clients, R.clients);
+
+  // merge invoices (aplicando remap)
+  const invoicesMerged = mergeInvoices(L.invoices, R.invoices, clientIdRemap);
+
+  // reconstruir caches de nombre por seguridad
+  const byClientId = new Map();
+  for(const c of clientsMerged){
+    byClientId.set(c.id, c);
+  }
+  for(const inv of invoicesMerged){
+    const c = byClientId.get(inv.clientId);
+    inv.clientNameCache = c ? c.name : (inv.clientNameCache || "");
+  }
+
+  // settings: preferir local si existe, si no remoto
+  const settingsMerged = L.settings || R.settings || makeDefaultData().settings;
+
+  // meta.updatedAt: el mayor + 1
+  const lu = Number(L?.meta?.updatedAt || 0);
+  const ru = Number(R?.meta?.updatedAt || 0);
+  const mergedAt = Math.max(lu, ru, Date.now());
+
+  return {
+    version: Math.max(Number(L.version||0), Number(R.version||0), 26),
+    clients: clientsMerged,
+    invoices: invoicesMerged,
+    settings: settingsMerged,
+    meta: { updatedAt: mergedAt }
+  };
+}
+
+function mergedFlagKey(){
+  // clave por cloudUID + active user
+  if(!CLOUD_UID || !ACTIVE_USER_ID) return "";
+  return K.CLOUD_MERGED_PREFIX + CLOUD_UID + "__" + ACTIVE_USER_ID;
+}
+
+function getMergedFlag(){
+  const k = mergedFlagKey();
+  if(!k) return false;
+  return localStorage.getItem(k) === "1";
+}
+
+function setMergedFlag(v){
+  const k = mergedFlagKey();
+  if(!k) return;
+  localStorage.setItem(k, v ? "1" : "0");
+}
+
+/* =========================================================
+   CLOUD SYNC (EMAIL/PASSWORD REAL) + MERGE
 ========================================================= */
 const cloudStatus = $("#cloudStatus");
 const cloudEmail = $("#cloudEmail");
@@ -281,6 +573,7 @@ function buildCloudRef(db){
   return db.ref("arslan_facturas_v26b/" + CLOUD_UID + "/users/" + ACTIVE_USER_ID + "/data");
 }
 
+/* ✅ CAMBIO: attachCloudForActiveUser ahora hace MERGE inteligente */
 function attachCloudForActiveUser(db){
   if(!CLOUD_READY || !ACTIVE_USER_ID) return;
 
@@ -292,6 +585,7 @@ function attachCloudForActiveUser(db){
 
   try{ CLOUD_REF.off(); }catch{}
 
+  // LISTENER: cuando llega update remoto, MERGE (no reemplazar a lo bruto)
   CLOUD_REF.on("value", snap=>{
     const remote = snap.val();
     if(!remote) return;
@@ -299,32 +593,72 @@ function attachCloudForActiveUser(db){
     const remoteUpdated = Number(remote?.meta?.updatedAt || 0);
     const localUpdated = Number(DB?.meta?.updatedAt || 0);
 
+    // si remoto es más nuevo -> merge hacia DB
     if(remoteUpdated > localUpdated){
       CLOUD_LOCK = true;
-      DB = remote;
+      const merged = mergeDataSmart(DB, remote);
+      DB = merged;
       saveLocalDB(true);
       renderAll();
       CLOUD_LOCK = false;
     }
   });
 
+  // GET inicial: decide pull/push/merge
   CLOUD_REF.get().then(snap=>{
     const remote = snap.val();
+
+    // no hay remoto -> subir local (siempre)
     if(!remote){
+      // si el local está vacío default, igualmente subimos para “inicializar” nube del usuario
       pushCloud();
-    }else{
-      const remoteUpdated = Number(remote?.meta?.updatedAt || 0);
-      const localUpdated = Number(DB?.meta?.updatedAt || 0);
+      setMergedFlag(true);
+      return;
+    }
+
+    // hay remoto:
+    // si local es default-like (vacío) -> traer remoto (no pisar nube)
+    const localIsEmpty = isDefaultLikeDB(DB);
+    if(localIsEmpty){
+      CLOUD_LOCK = true;
+      DB = ensureDBShape(remote);
+      saveLocalDB(true);
+      renderAll();
+      CLOUD_LOCK = false;
+      setMergedFlag(true);
+      return;
+    }
+
+    // si ya hicimos merge antes, usamos updatedAt como acelerador
+    const alreadyMerged = getMergedFlag();
+    const remoteUpdated = Number(remote?.meta?.updatedAt || 0);
+    const localUpdated = Number(DB?.meta?.updatedAt || 0);
+
+    if(alreadyMerged){
+      // normal: el más nuevo manda
       if(localUpdated > remoteUpdated){
         pushCloud();
       }else if(remoteUpdated > localUpdated){
         CLOUD_LOCK = true;
-        DB = remote;
+        DB = mergeDataSmart(DB, remote);
         saveLocalDB(true);
         renderAll();
         CLOUD_LOCK = false;
       }
+      return;
     }
+
+    // primera vez con esta nube+usuario: MERGE SIEMPRE para no perder nada
+    CLOUD_LOCK = true;
+    DB = mergeDataSmart(DB, remote);
+    saveLocalDB(true);
+    renderAll();
+    CLOUD_LOCK = false;
+
+    // y subimos el merge al cloud
+    pushCloud();
+    setMergedFlag(true);
+
   }).catch((e)=>{
     console.error("Cloud get error:", e);
   });
@@ -370,8 +704,9 @@ function initCloud(){
     if(cloudUidLabel) cloudUidLabel.textContent = CLOUD_UID;
 
     if(ACTIVE_USER_ID && DB){
+      // ✅ IMPORTANTE: no marcar mergedFlag aquí; lo controla attachCloudForActiveUser
       attachCloudForActiveUser(fb.db);
-      pushCloud();
+      // pushCloud NO inmediato: attach decide pull/merge/push
     }
   });
 }
@@ -547,8 +882,9 @@ async function checkPin(){
       CLOUD_READY = true;
       setCloudStatus("ok","☁️ Nube online");
       if(cloudUidLabel) cloudUidLabel.textContent = CLOUD_UID;
+
+      // ✅ IMPORTANTÍSIMO: attach hace merge inteligente y evita pisar nube con local vacío
       attachCloudForActiveUser(fb.db);
-      pushCloud();
     }else{
       if(FIREBASE_READY) setCloudStatus("warn","☁️ Nube: sin sesión");
     }
@@ -854,6 +1190,7 @@ const invFrom = $("#invFrom");
 const invTo = $("#invTo");
 const invClearFilters = $("#invClearFilters");
 const btnNewInvoice = $("#btnNewInvoice");
+const btnBulkInvoices = $("#btnBulkInvoices"); // ✅ NUEVO BOTÓN
 const invCountInfo = $("#invCountInfo");
 const invTotalInfo = $("#invTotalInfo");
 
@@ -1157,6 +1494,335 @@ function openInvoiceModal(editId=null){
 
   foot.append(cancel, save);
   openModal(isEdit ? "Editar factura" : "Nueva factura", body, foot);
+}
+
+/* =========================================================
+   BULK ADD INVOICES (PEGAR TABLA + PEGADO SIMPLE)
+========================================================= */
+
+function detectSeparator(line){
+  // prioridad: TAB > ; > ,
+  const t = (line.match(/\t/g) || []).length;
+  const s = (line.match(/;/g) || []).length;
+  const c = (line.match(/,/g) || []).length;
+  if(t >= s && t >= c && t > 0) return "\t";
+  if(s >= c && s > 0) return ";";
+  if(c > 0) return ",";
+  // si no hay separadores típicos, devolvemos " " (modo simple)
+  return " ";
+}
+
+function splitLine(line, sep){
+  if(sep === " "){
+    // modo simple se maneja con parser regex (no split)
+    return [line];
+  }
+  return line.split(sep).map(x=>safeText(x));
+}
+
+function normalizeHeaderKey(k){
+  const x = safeText(k).toLowerCase();
+  if(["fecha","date","dia","día"].includes(x)) return "dateISO";
+  if(["nº","no","num","numero","número","invoice","factura","number"].includes(x)) return "number";
+  if(["cliente","client","customer"].includes(x)) return "client";
+  if(["tag","etiqueta"].includes(x)) return "tag";
+  if(["importe","amount","total","€","eur"].includes(x)) return "amount";
+  if(["estado","status"].includes(x)) return "status";
+  if(["obs","observaciones","nota","notas","notes"].includes(x)) return "notes";
+  return x;
+}
+
+function parseAmount(raw){
+  let s = safeText(raw);
+  if(!s) return 0;
+  s = s.replaceAll("€","").replace(/\s+/g,"");
+  if(s.includes(",") && !s.includes(".")){
+    s = s.replaceAll(".","").replaceAll(",",".");
+  }else if(s.includes(",") && s.includes(".")){
+    s = s.replaceAll(".","").replaceAll(",",".");
+  }
+  const n = Number(s);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function parseStatus(raw){
+  const s = safeText(raw).toLowerCase();
+  if(!s) return "Pendiente";
+  if(["pagada","pagado","paid","ok","hecha","cobrada"].includes(s)) return "Pagada";
+  if(["pendiente","pending","por cobrar","open"].includes(s)) return "Pendiente";
+  return s.includes("pag") ? "Pagada" : "Pendiente";
+}
+
+function findClientByName(name){
+  const q = safeText(name).toLowerCase();
+  if(!q) return null;
+  return DB.clients.find(c=>safeText(c.name).toLowerCase()===q) || null;
+}
+
+function ensureClient(name){
+  const nm = safeText(name);
+  if(!nm) return null;
+  let c = findClientByName(nm);
+  if(c) return c;
+
+  c = { id:"cli_"+uid(), name:nm, phone:"", notes:"", tags:[nm] };
+  DB.clients.push(c);
+  return c;
+}
+
+/* ✅ NUEVO: parser para líneas tipo:
+   2025-10-27 FA-20251027-105447 BRASEROS CENTRO 175,10
+   [opcional] estado y notas:
+   2025-10-27 FA-... BRASEROS CENTRO 175,10 Pagada algo
+*/
+function parseSimpleInvoiceLine(line){
+  const s = safeText(line);
+  if(!s) return null;
+
+  // dateISO + number + tag... + amount + (rest optional)
+  // amount: 123,45 o 123.45 o 1.234,56
+  const re = /^(\d{4}-\d{2}-\d{2})\s+(\S+)\s+(.+?)\s+(-?\d[\d.,]*)\s*(.*)$/;
+  const m = s.match(re);
+  if(!m) return null;
+
+  const dateISO = safeText(m[1]);
+  const number = safeText(m[2]);
+  const tag = safeText(m[3]);
+  const amount = parseAmount(m[4]);
+  const tail = safeText(m[5]);
+
+  let status = "Pendiente";
+  let notes = "";
+
+  if(tail){
+    const parts = tail.split(/\s+/).filter(Boolean);
+    if(parts.length){
+      const maybeStatus = parseStatus(parts[0]);
+      // Si el primer token se parece a estado, lo tomamos
+      if(["Pagada","Pendiente"].includes(maybeStatus)){
+        status = maybeStatus;
+        notes = safeText(parts.slice(1).join(" "));
+      }else{
+        notes = tail;
+      }
+    }
+  }
+
+  // En este formato NO viene cliente, solo tag (p.e. “BRASEROS CENTRO”)
+  // Así que clientName = BRASEROS (o el cliente BRASEROS por defecto)
+  // ✅ Regla: si tag contiene "BRASEROS" => cliente = cliente braseros (si existe)
+  let clientName = "";
+  const upTag = tag.toUpperCase();
+  if(upTag.includes("BRASEROS")){
+    clientName = "RESTAURACION HERMANOS MARIJUÁN (BRASEROS)";
+  }else{
+    // fallback: usamos tag como cliente
+    clientName = tag;
+  }
+
+  return { dateISO, number, clientName, tag, amount, status, notes };
+}
+
+function openBulkInvoicesModal(){
+  const body = document.createElement("div");
+  body.className = "formGrid";
+
+  const info = document.createElement("div");
+  info.className = "muted full";
+  info.style.gridColumn = "1 / -1";
+  info.innerHTML = `
+    <div><b>Pega aquí una tabla</b> (Excel/Google Sheets) o líneas simples.</div>
+    <div style="margin-top:8px"><b>Modo SIMPLE (como tú pegas):</b></div>
+    <div class="muted" style="margin-top:4px">
+      2025-10-27 FA-20251027-105447 BRASEROS CENTRO 175,10
+    </div>
+    <div style="margin-top:10px"><b>Modo TABLA (sin cabecera):</b> Fecha | Nº | Cliente | Tag | Importe | Estado | Notas</div>
+    <div class="muted" style="margin-top:4px">
+      2026-01-05\tFA-001\tRIVIERA\tRIVIERA\t100\tPendiente\tprueba
+    </div>
+    <div style="margin-top:10px"><b>Modo TABLA (con cabecera, orden libre):</b></div>
+    <div class="muted">fecha\tnumero\tcliente\ttag\timporte\testado\tnotas</div>
+  `;
+
+  const txt = mkTextArea("Pegar aquí", "");
+  txt.wrap.classList.add("full");
+  txt.textarea.rows = 12;
+
+  const preview = document.createElement("div");
+  preview.className = "muted full";
+  preview.style.gridColumn = "1 / -1";
+  preview.textContent = "Pegas datos y pulsa “Previsualizar”.";
+
+  body.append(info, txt.wrap, preview);
+
+  const foot = document.createElement("div");
+  foot.className = "row wrap";
+
+  const close = document.createElement("button");
+  close.className = "btn ghost";
+  close.textContent = "Cerrar";
+  close.onclick = closeModal;
+
+  const btnPrev = document.createElement("button");
+  btnPrev.className = "btn ghost";
+  btnPrev.textContent = "Previsualizar";
+
+  const btnImport = document.createElement("button");
+  btnImport.className = "btn";
+  btnImport.textContent = "Importar";
+  btnImport.disabled = true;
+
+  let parsed = null;
+
+  function doParse(){
+    const raw = String(txt.textarea.value || "");
+    const lines = raw
+      .split(/\r?\n/)
+      .map(l=>l.trim())
+      .filter(l=>l.length>0);
+
+    if(lines.length===0){
+      preview.textContent = "No hay líneas.";
+      btnImport.disabled = true;
+      parsed = null;
+      return;
+    }
+
+    const sep = detectSeparator(lines[0]);
+
+    // Si sep === " " -> intentar modo SIMPLE por línea
+    if(sep === " "){
+      const out = [];
+      let skipped = 0;
+
+      for(const line of lines){
+        const row = parseSimpleInvoiceLine(line);
+        if(!row){
+          skipped++;
+          continue;
+        }
+        // Validaciones mínimas
+        if(!row.dateISO || !row.number || !row.clientName){
+          skipped++;
+          continue;
+        }
+        out.push(row);
+      }
+
+      const total = out.reduce((s,r)=>s + Number(r.amount||0), 0);
+
+      preview.innerHTML = `
+        <div><b>Modo detectado:</b> SIMPLE (espacios)</div>
+        <div><b>Filas válidas:</b> ${out.length}</div>
+        <div><b>Saltadas:</b> ${skipped}</div>
+        <div style="margin-top:6px"><b>Total importado:</b> ${money(total)}</div>
+        <div style="margin-top:6px" class="muted">Se asignará cliente BRASEROS automáticamente si el tag contiene “BRASEROS”.</div>
+      `;
+
+      parsed = out;
+      btnImport.disabled = out.length === 0;
+      return;
+    }
+
+    // TABLA (TAB/;/,)
+    const first = splitLine(lines[0], sep);
+    const headerKeys = first.map(normalizeHeaderKey);
+    const looksHeader = headerKeys.includes("dateISO") || headerKeys.includes("client") || headerKeys.includes("number");
+
+    let cols = null;
+    let startIdx = 0;
+
+    if(looksHeader){
+      cols = headerKeys;
+      startIdx = 1;
+    }else{
+      cols = ["dateISO","number","client","tag","amount","status","notes"];
+      startIdx = 0;
+    }
+
+    const out = [];
+    let skipped = 0;
+
+    for(let i=startIdx; i<lines.length; i++){
+      const parts = splitLine(lines[i], sep);
+      if(parts.length===1 && !parts[0]) continue;
+
+      const row = {};
+      for(let c=0; c<cols.length; c++){
+        const key = cols[c];
+        const val = parts[c] ?? "";
+        row[key] = val;
+      }
+
+      const dateISO = safeText(row.dateISO || row.fecha || "");
+      const number = safeText(row.number || "");
+      const clientName = safeText(row.client || row.cliente || "");
+      const tag = safeText(row.tag || "");
+      const amount = parseAmount(row.amount || row.importe || "");
+      const status = parseStatus(row.status || row.estado || "");
+      const notes = safeText(row.notes || row.notas || "");
+
+      if(!dateISO || !number || !clientName){
+        skipped++;
+        continue;
+      }
+
+      out.push({ dateISO, number, clientName, tag, amount, status, notes });
+    }
+
+    const total = out.reduce((s,r)=>s + Number(r.amount||0), 0);
+
+    preview.innerHTML = `
+      <div><b>Modo detectado:</b> TABLA (${sep === "\t" ? "TAB" : escapeHtml(sep)})</div>
+      <div><b>Filas válidas:</b> ${out.length}</div>
+      <div><b>Saltadas (faltan campos):</b> ${skipped}</div>
+      <div style="margin-top:6px"><b>Total importado:</b> ${money(total)}</div>
+      <div style="margin-top:6px" class="muted">Se crearán clientes automáticamente si no existen.</div>
+    `;
+
+    parsed = out;
+    btnImport.disabled = out.length === 0;
+  }
+
+  btnPrev.onclick = doParse;
+
+  btnImport.onclick = ()=>{
+    if(!parsed || parsed.length===0) return;
+
+    // crear en lote
+    for(const r of parsed){
+      const c = ensureClient(r.clientName);
+      if(!c) continue;
+
+      const tagFinal = r.tag || (Array.isArray(c.tags) && c.tags[0]) || "";
+
+      const newInv = normalizeInvoice({
+        id: "inv_" + uid(),
+        dateISO: r.dateISO,
+        number: r.number,
+        clientId: c.id,
+        clientNameCache: c.name,
+        tag: tagFinal,
+        amount: Number(r.amount||0),
+        status: r.status || "Pendiente",
+        notes: r.notes || "",
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      });
+
+      DB.invoices.push(newInv);
+    }
+
+    saveLocalDB();
+    closeModal();
+    renderAll();
+    alert(`Importadas ✅: ${parsed.length} factura(s)`);
+  };
+
+  foot.append(close, btnPrev, btnImport);
+  openModal("Bulk: pegar facturas", body, foot);
+
+  setTimeout(()=>txt.textarea.focus(), 80);
 }
 
 /* ---------------------------
@@ -2031,7 +2697,7 @@ function resetLocal(){
   foot.className="row";
 
   const cancel = document.createElement("button");
-  cancel.className="btn ghost";
+  cancel.className = "btn ghost";
   cancel.textContent="Cancelar";
   cancel.onclick=closeModal;
 
@@ -2127,6 +2793,9 @@ function bindEvents(){
   });
 
   btnNewInvoice?.addEventListener("click", ()=>openInvoiceModal(null));
+
+  // ✅ NUEVO: Bulk
+  btnBulkInvoices?.addEventListener("click", openBulkInvoicesModal);
 
   // Clients
   btnNewClient?.addEventListener("click", ()=>openClientModal(null));
@@ -2230,8 +2899,9 @@ function bindEvents(){
       CLOUD_READY = true;
       setCloudStatus("ok","☁️ Nube online");
       if(cloudUidLabel) cloudUidLabel.textContent = CLOUD_UID;
+
+      // ✅ attach hace merge inteligente y evita que “local vacío” pise la nube
       attachCloudForActiveUser(fb.db);
-      pushCloud();
     }
   }else{
     lock();
